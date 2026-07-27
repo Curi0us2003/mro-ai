@@ -2,81 +2,100 @@
 
 > **A Voice-First AI Assistant for Aircraft Maintenance Technicians**
 >
-> AI Maintenance Voice Copilot enables aircraft technicians to perform inspections entirely through natural conversation while automatically generating structured maintenance records, retrieving technical knowledge from manuals, and producing professional maintenance reports.
+> AI Maintenance Voice Copilot is an intelligent, voice-first maintenance assistant that enables aircraft technicians to perform inspections naturally through conversation while automatically generating structured maintenance records, answering technical questions from maintenance manuals, and creating professional maintenance reports.
+>
+> The solution is designed to integrate with **SAP HANA Cloud** and **Azure OpenAI GPT-4.1**, providing an enterprise-ready AI copilot for modern aircraft maintenance operations.
+
+---
+
+# 📖 Table of Contents
+
+- Project Vision
+- Problem Statement
+- Solution Overview
+- Key Features
+- System Architecture
+- AI Agent Architecture
+- Technology Stack
+- Project Structure
+- Application Workflow
+- Environment Variables
+- Installation
+- Running the Application
+- Future Roadmap
+- License
 
 ---
 
 # 🚀 Project Vision
 
-Aircraft maintenance technicians often work in environments where stopping to use a computer is impractical.
+Aircraft maintenance technicians spend a significant amount of time documenting inspections rather than performing maintenance.
 
-Traditional maintenance software requires technicians to:
+Current maintenance systems require technicians to:
 
+- Stop working
 - Remove gloves
 - Walk to a workstation
-- Search through lengthy manuals
-- Enter maintenance records manually
-- Complete multiple forms
-- Remember findings after finishing the inspection
+- Search maintenance manuals
+- Fill multiple maintenance forms
+- Enter maintenance findings manually
 
-This leads to:
+This process is slow, error-prone and often results in delayed documentation.
 
-- Delayed documentation
-- Human errors
-- Missing inspection details
-- Loss of institutional knowledge
-- Reduced maintenance efficiency
+The AI Maintenance Voice Copilot transforms this workflow by allowing technicians to simply speak naturally while working.
 
-The AI Maintenance Voice Copilot solves this by allowing technicians to simply **talk naturally** while working.
+The AI understands the inspection, asks intelligent follow-up questions, retrieves technical information, and automatically generates structured maintenance records.
 
-The AI:
-
-- Listens continuously
-- Understands maintenance conversations
-- Asks intelligent follow-up questions
-- Retrieves information from manuals
-- Generates structured maintenance records
-- Produces professional PDF reports
-- Preserves organisational knowledge
+The long-term objective is to preserve decades of maintenance expertise while significantly reducing maintenance documentation time.
 
 ---
 
-# 🎯 Objectives
+# ❗ Problem Statement
 
-The application aims to:
+Aircraft maintenance engineers work in challenging environments:
 
-- Enable completely voice-based aircraft inspections
-- Minimise manual data entry
-- Improve maintenance record quality
-- Reduce technician workload
-- Preserve expert knowledge
-- Integrate with SAP ecosystems
-- Support future predictive maintenance
+- Loud hangars
+- Tight spaces
+- Gloves
+- Hands occupied
+- Time-critical inspections
+
+Traditional maintenance software interrupts their workflow.
+
+Experienced engineers also possess valuable knowledge that is rarely documented. When they retire, that knowledge is lost.
+
+This project captures that expertise through continuous AI-assisted conversations.
+
+---
+
+# 💡 Solution Overview
+
+The AI Maintenance Voice Copilot enables technicians to:
+
+- Speak naturally during inspections
+- Record maintenance findings using voice
+- Receive spoken AI responses
+- Ask technical questions
+- Search maintenance manuals
+- Retrieve previous maintenance history
+- Automatically generate structured maintenance records
+- Generate professional PDF reports
+- Store maintenance history inside SAP HANA Cloud
 
 ---
 
 # ✨ Key Features
 
-## 🎤 Voice First Experience
+## 🎤 Voice-First Maintenance
 
-- Continuous speech recognition
-- Natural language conversations
-- Live transcription
-- Voice responses
-- Hands-free workflow
-
----
-
-## 🤖 Intelligent AI Conversation
-
-Instead of filling forms manually, technicians simply speak naturally.
+The technician communicates naturally.
 
 Example:
 
 ```
 Technician
 
-Found corrosion on the left engine turbine blade.
+Found corrosion on the turbine blade.
 
 AI
 
@@ -88,11 +107,11 @@ VT-AAB
 
 AI
 
-Which stage?
+Which engine?
 
 Technician
 
-Stage 2
+Left Engine.
 
 AI
 
@@ -103,33 +122,48 @@ Technician
 Moderate.
 ```
 
-The AI automatically builds the maintenance record.
+No forms.
+
+No typing.
+
+Just conversation.
+
+---
+
+## 🤖 Intelligent AI Conversation
+
+The AI:
+
+- Understands context
+- Maintains conversation history
+- Asks follow-up questions
+- Validates information
+- Confirms maintenance records
 
 ---
 
 ## 📚 Technical Knowledge Assistant
 
-The AI can answer questions like:
+The technician can ask questions such as:
 
 - What torque should I use?
 - Show previous failures.
-- When was this part replaced?
-- Show inspection interval.
+- When was this component replaced?
 - Display maintenance history.
+- Show inspection interval.
 
-Knowledge comes from:
+The AI retrieves answers from:
 
 - Aircraft manuals
-- Maintenance records
-- Historical inspections
+- Historical maintenance records
 - SAP HANA Cloud
-- Vector search
+- Internal knowledge base
 
 ---
 
-## 📝 Automatic Maintenance Record Generation
+## 📝 Structured Maintenance Records
 
-The AI automatically creates structured maintenance records including:
+The AI automatically extracts:
 
 - Aircraft
 - Registration
@@ -140,88 +174,104 @@ The AI automatically creates structured maintenance records including:
 - Severity
 - Recommendation
 - Technician
-- Date
+- Timestamp
 - AI Summary
 
 ---
 
-## 📄 PDF Report Generation
+## 📄 Automatic PDF Generation
 
-Professional reports include:
+Professional maintenance reports include:
 
-- Company logo
-- Aircraft information
+- Company Logo
+- Aircraft Information
+- Technician Information
+- Inspection Details
 - Findings
 - Severity
 - Recommendations
-- AI Summary
-- Signature section
+- AI Generated Summary
+- Signature Section
 
 ---
 
-## 🧠 Knowledge Preservation
+## 🧠 Organisational Knowledge Capture
 
-Every conversation becomes organisational knowledge.
+Every conversation becomes part of the company's maintenance knowledge base.
 
-The system stores:
+Stored information includes:
 
-- Conversations
+- Technician conversations
 - Maintenance findings
-- Technician notes
 - Recommendations
 - Previous inspections
 - Historical failures
+- AI summaries
 
 ---
 
-# 🏗 System Architecture
+# 🏗️ System Architecture
 
 ```
-                     React Frontend
-                             │
-               Voice + Text User Interface
-                             │
-                  WebSocket + REST API
-                             │
-                       FastAPI Backend
-                             │
-                LangGraph Agent Orchestrator
-                             │
-     ┌──────────────┬──────────────┬──────────────┐
-     │              │              │
-Conversation   Knowledge     Report Generation
-Agent          Agent         Agent
-     │              │              │
-     └──────────────┼──────────────┘
-                    │
-              Core Services Layer
-                    │
-      ┌─────────────┼──────────────┐
-      │             │              │
-Speech To Text   LLM Service   PDF Service
-      │             │              │
-      └─────────────┼──────────────┘
-                    │
+                           React Frontend
+                                  │
+                  Voice + Text User Interface
+                                  │
+                    REST API + WebSocket Layer
+                                  │
+                           FastAPI Backend
+                                  │
+                      LangGraph Agent Workflow
+                                  │
+      ┌─────────────────────────────────────────────────┐
+      │                                                 │
+Conversation Agent                              Knowledge Agent
+      │                                                 │
+Extraction Agent                               Validation Agent
+      │                                                 │
+      └─────────────────────────────────────────────────┘
+                                  │
+                           Service Layer
+                                  │
+      ┌──────────────┬──────────────┬──────────────┐
+      │              │              │
+ Speech Service   Azure GPT-4.1   PDF Service
+      │              │              │
+      └──────────────┼──────────────┘
+                     │
              SAP HANA Cloud Database
 ```
 
 ---
 
-# 🤖 AI Agents
+# 🤖 AI Agent Architecture
 
 ## Conversation Agent
 
 Responsible for:
 
-- Talking naturally
+- Natural conversations
+- Collecting maintenance information
 - Asking follow-up questions
-- Maintaining conversation flow
+- Managing inspection sessions
 
 ---
 
 ## Extraction Agent
 
-Converts conversations into structured JSON.
+Converts natural language into structured maintenance records.
+
+Example:
+
+```json
+{
+  "aircraft": "VT-AAB",
+  "engine": "Left Engine",
+  "component": "Turbine Blade",
+  "finding": "Corrosion",
+  "severity": "Moderate"
+}
+```
 
 ---
 
@@ -229,10 +279,11 @@ Converts conversations into structured JSON.
 
 Validates:
 
-- Aircraft
-- Components
-- Severity
-- Part Numbers
+- Aircraft registration
+- Component names
+- Part numbers
+- Severity values
+- Missing fields
 
 ---
 
@@ -240,20 +291,22 @@ Validates:
 
 Retrieves:
 
-- Manuals
+- Aircraft manuals
 - Torque specifications
-- Previous failures
-- Historical maintenance
+- Previous maintenance history
+- Inspection procedures
+- Historical failures
 
 ---
 
 ## Report Agent
 
-Generates:
+Responsible for:
 
 - AI Summary
-- PDF Reports
-- SAP Ready Maintenance Record
+- Maintenance Report
+- PDF Generation
+- SAP-ready Maintenance Record
 
 ---
 
@@ -264,12 +317,14 @@ Generates:
 - Python 3.12
 - FastAPI
 - SQLAlchemy
+- SAP HANA Cloud
+- Azure OpenAI GPT-4.1
 - LangGraph
-- LangChain
-- OpenAI SDK
 - Faster Whisper
 - ReportLab
+- WebSockets
 - Pydantic
+- python-dotenv
 
 ---
 
@@ -279,21 +334,23 @@ Generates:
 - TypeScript
 - Vite
 - Material UI
-- TailwindCSS
+- Tailwind CSS
+- MediaRecorder API
 
 ---
 
 ## Database
 
-SAP HANA Cloud
+- SAP HANA Cloud
 
 ---
 
-## AI
+## AI & Voice
 
-- GPT Models
-- Whisper
-- Text-to-Speech
+- Azure OpenAI GPT-4.1
+- Faster Whisper
+- OpenAI Text-to-Speech (Azure-compatible implementation)
+- LangGraph Multi-Agent Workflow
 
 ---
 
@@ -304,30 +361,52 @@ maintenance-ai-copilot/
 
 │
 ├── backend/
+│   │
 │   ├── api/
+│   │     auth.py
+│   │     conversation.py
+│   │     maintenance.py
+│   │     manuals.py
+│   │     reports.py
+│   │     websocket.py
+│   │
 │   ├── agents/
-│   ├── services/
+│   │     conversation_agent.py
+│   │     extraction_agent.py
+│   │     validation_agent.py
+│   │     knowledge_agent.py
+│   │     report_agent.py
+│   │
 │   ├── models/
-│   ├── prompts/
+│   │     aircraft.py
+│   │     maintenance.py
+│   │     technician.py
+│   │
+│   ├── services/
+│   │     hana_service.py
+│   │     llm_service.py
+│   │     speech_to_text.py
+│   │     text_to_speech.py
+│   │     pdf_service.py
+│   │     vector_service.py
+│   │     conversation_memory.py
+│   │
 │   ├── utils/
+│   │
 │   ├── app.py
 │   ├── config.py
 │   ├── database.py
 │   └── dependencies.py
 │
 ├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   ├── components/
-│   │   ├── hooks/
-│   │   ├── services/
-│   │   └── assets/
-│   └── package.json
 │
 ├── manuals/
 ├── uploads/
 ├── generated_reports/
+├── logs/
+│
 ├── requirements.txt
+├── .env
 ├── .env.example
 └── README.md
 ```
@@ -337,147 +416,224 @@ maintenance-ai-copilot/
 # 🔄 Application Workflow
 
 ```
-Technician
+Technician Starts Inspection
 
-↓
+            │
 
-Voice Input
+            ▼
 
-↓
+🎤 Voice Recording
 
-Speech to Text
+            │
 
-↓
+            ▼
+
+Speech-to-Text (Whisper)
+
+            │
+
+            ▼
 
 Conversation Agent
 
-↓
+            │
+
+            ▼
 
 Information Extraction
 
-↓
+            │
+
+            ▼
 
 Validation
 
-↓
+            │
+
+            ▼
 
 Knowledge Retrieval
 
-↓
+            │
+
+            ▼
 
 Follow-up Questions
 
-↓
+            │
 
-Maintenance Record
+            ▼
 
-↓
+Structured Maintenance Record
 
-PDF Generation
+            │
 
-↓
+            ▼
 
-Save to SAP HANA
+Generate PDF
+
+            │
+
+            ▼
+
+Store Record in SAP HANA Cloud
 ```
 
 ---
 
-# 📡 Backend Services
+# 🔌 Backend Services
 
 | Service | Responsibility |
-|----------|---------------|
-| Speech To Text | Voice transcription |
-| Text To Speech | AI voice responses |
-| LLM Service | AI reasoning |
-| HANA Service | Database access |
-| Vector Service | Manual retrieval |
-| PDF Service | Report generation |
-| Conversation Memory | Session memory |
+|----------|----------------|
+| Speech Service | Converts speech to text |
+| Text-to-Speech Service | Generates spoken AI responses |
+| LLM Service | Azure OpenAI communication |
+| HANA Service | SAP HANA Cloud operations |
+| Vector Service | Manual & document retrieval |
+| PDF Service | Maintenance report generation |
+| Conversation Memory | Session memory management |
 
 ---
 
-# 🌐 REST APIs
+# 🌐 API Endpoints
 
-| Endpoint | Purpose |
-|----------|----------|
-| /conversation | Voice conversation |
-| /maintenance | Maintenance records |
-| /manuals | Manual search |
-| /reports | PDF reports |
-| /auth | Authentication |
+| Endpoint | Description |
+|----------|-------------|
+| `/conversation` | Voice conversation |
+| `/maintenance` | Maintenance records |
+| `/manuals` | Manual search |
+| `/reports` | PDF reports |
+| `/auth` | Authentication |
+| `/ws` | Live WebSocket communication |
 
 ---
 
-# 🔐 Environment Variables
+# ⚙️ Environment Variables
 
-Create a `.env` file using `.env.example`.
+Create a `.env` file in the project root.
 
-Example:
-
-```
-OPENAI_API_KEY=
+```env
+# SAP HANA Cloud
 
 HANA_HOST=
-
-HANA_PORT=
-
+HANA_PORT=443
 HANA_USER=
-
 HANA_PASSWORD=
-
 HANA_SCHEMA=
-
 HANA_ENCRYPT=true
+
+# Azure OpenAI
+
+AZURE_OPENAI_URL=
+AZURE_API_KEY=
+
+# Security
+
+SECRET_KEY=
+```
+
+> **Important:** Never commit your `.env` file to GitHub. Add it to `.gitignore` and commit only `.env.example`.
+
+---
+
+# ▶️ Installation
+
+Clone the repository:
+
+```bash
+git clone <repository-url>
+cd maintenance-ai-copilot
+```
+
+Install backend dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Install frontend dependencies:
+
+```bash
+cd frontend
+npm install
 ```
 
 ---
 
-# ▶ Running Backend
+# ▶️ Running the Backend
 
 ```bash
 cd backend
 
-pip install -r requirements.txt
-
 uvicorn app:app --reload
+```
+
+Backend URL:
+
+```
+http://localhost:8000
+```
+
+Swagger API Documentation:
+
+```
+http://localhost:8000/docs
 ```
 
 ---
 
-# ▶ Running Frontend
+# ▶️ Running the Frontend
 
 ```bash
 cd frontend
-
-npm install
 
 npm run dev
 ```
 
 ---
 
-# 📈 Future Enhancements
+# 📅 Future Roadmap
 
-- SAP iMRO Integration
 - SAP S/4HANA Integration
+- SAP iMRO Integration
+- SAP Knowledge Graph Integration
 - SAP Joule Integration
 - Predictive Maintenance
-- Computer Vision
-- Smart Glass Support
-- Offline Voice Mode
+- AI Failure Pattern Detection
+- Computer Vision for Defect Recognition
+- Smart Glass Integration
+- Offline Voice Processing
 - Multi-language Support
-- Digital Twin Integration
+- Mobile & Tablet Optimisation
 
 ---
 
-# 📜 License
+# 🤝 Contributing
 
-MIT License
+Contributions are welcome.
+
+Please open an issue before submitting major feature requests or pull requests.
 
 ---
 
-# 👨‍💻 Author
+# 📄 License
 
-AI Maintenance Voice Copilot
+This project is licensed under the MIT License.
 
-Built using Python, FastAPI, React, SAP HANA Cloud and Large Language Models.
+---
+
+# 👨‍💻 Developed By
+
+**AI Maintenance Voice Copilot**
+
+Built with:
+
+- Python
+- FastAPI
+- SAP HANA Cloud
+- Azure OpenAI GPT-4.1
+- LangGraph
+- React
+- TypeScript
+- Faster Whisper
+- ReportLab
