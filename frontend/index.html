@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Maintenance Voice Copilot</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ============================================================
+       SHELL BAR
+  ============================================================= -->
+  <header class="shell-bar">
+    <div class="shell-bar__brand">
+      <span class="shell-bar__logo" aria-hidden="true">✈</span>
+      <span class="shell-bar__title">AI Maintenance Voice Copilot</span>
+    </div>
+
+    <nav class="role-switch" role="tablist" aria-label="Select view">
+      <button class="role-switch__btn is-active" id="tab-technician" role="tab" aria-selected="true">
+        Technician
+      </button>
+      <button class="role-switch__btn" id="tab-supervisor" role="tab" aria-selected="false">
+        Supervisor
+      </button>
+    </nav>
+  </header>
+
+  <main class="app-main">
+
+    <!-- ============================================================
+         TECHNICIAN VIEW
+    ============================================================= -->
+    <section id="view-technician" class="view is-active">
+
+      <!-- Start-session panel -->
+      <div class="panel panel--start" id="panel-start">
+        <h1 class="panel__title">Start an inspection</h1>
+        <p class="panel__hint">Enter your name to begin a new voice-guided maintenance session.</p>
+        <div class="field-row">
+          <input type="text" id="input-technician-name" class="text-input" placeholder="Technician name" maxlength="128">
+          <button class="btn btn--primary" id="btn-start-session">Start session</button>
+        </div>
+        <p class="field-error" id="start-session-error"></p>
+      </div>
+
+      <!-- Active session workspace -->
+      <div class="workspace" id="workspace" hidden>
+
+        <div class="workspace__top">
+          <div class="session-info">
+            <span class="session-info__label">Technician</span>
+            <span class="session-info__value" id="session-technician-name">—</span>
+          </div>
+          <button class="btn btn--ghost btn--small" id="btn-end-session">End session</button>
+        </div>
+
+        <!-- Voice hero control -->
+        <div class="voice-hero">
+          <button class="mic-btn" id="btn-mic" aria-label="Start recording">
+            <svg class="mic-btn__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/>
+              <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.93V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.07A7 7 0 0 0 19 11Z" fill="currentColor"/>
+            </svg>
+            <span class="mic-btn__ring"></span>
+          </button>
+          <p class="voice-hero__status" id="voice-status">Tap to speak a finding</p>
+        </div>
+
+        <!-- Text fallback -->
+        <form class="text-fallback" id="form-text-fallback">
+          <input type="text" id="input-text-message" class="text-input" placeholder="Or type instead of speaking…" autocomplete="off">
+          <button type="submit" class="btn btn--secondary">Send</button>
+        </form>
+
+        <div class="workspace__grid">
+
+          <!-- Transcript / conversation -->
+          <div class="card card--transcript">
+            <h2 class="card__title">Conversation</h2>
+            <div class="transcript" id="transcript" aria-live="polite">
+              <p class="transcript__empty">Your conversation with the copilot will appear here.</p>
+            </div>
+            <audio id="reply-audio" hidden></audio>
+          </div>
+
+          <!-- Current record status -->
+          <div class="card card--record">
+            <div class="card__header-row">
+              <h2 class="card__title">Current finding</h2>
+              <span class="status-pill" id="record-status-pill">Not started</span>
+            </div>
+
+            <dl class="record-fields" id="record-fields">
+              <div class="record-fields__row"><dt>Aircraft reg.</dt><dd data-field="AIRCRAFT_REG">—</dd></div>
+              <div class="record-fields__row"><dt>Component</dt><dd data-field="COMPONENT">—</dd></div>
+              <div class="record-fields__row"><dt>Finding</dt><dd data-field="FINDING">—</dd></div>
+              <div class="record-fields__row"><dt>Severity</dt><dd data-field="SEVERITY">—</dd></div>
+              <div class="record-fields__row"><dt>Location</dt><dd data-field="LOCATION">—</dd></div>
+              <div class="record-fields__row"><dt>Recommended action</dt><dd data-field="RECOMMENDED_ACTION">—</dd></div>
+            </dl>
+
+            <button class="btn btn--primary btn--full" id="btn-download-report" disabled>
+              Download PDF report
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SUPERVISOR VIEW
+    ============================================================= -->
+    <section id="view-supervisor" class="view">
+
+      <div class="panel__header-row">
+        <h1 class="panel__title">Maintenance records</h1>
+        <div class="supervisor-toolbar">
+          <input type="text" id="input-filter-aircraft" class="text-input text-input--small" placeholder="Filter by aircraft reg.">
+          <button class="btn btn--secondary btn--small" id="btn-refresh-records">Refresh</button>
+        </div>
+      </div>
+
+      <div class="records-layout">
+        <div class="card card--records-table">
+          <table class="records-table">
+            <thead>
+              <tr>
+                <th>Aircraft</th>
+                <th>Component</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Technician</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="records-table-body">
+              <tr><td colspan="6" class="records-table__empty">Loading records…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card card--record-detail" id="record-detail">
+          <p class="record-detail__placeholder">Select a record to view its full details and conversation transcript.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

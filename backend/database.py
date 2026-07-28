@@ -124,64 +124,26 @@ def _execute(conn, sql: str, params: Optional[tuple] = None):
 # Schema Definition / Initialisation
 # ==========================================================
 
-_SCHEMA_STATEMENTS = [
-    # ---- Manuals (ingested source documents) -------------
-    f"""
-    CREATE TABLE MANUALS (
-        MANUAL_ID       NVARCHAR(36)  PRIMARY KEY,
-        FILE_NAME       NVARCHAR(256) NOT NULL,
-        TITLE           NVARCHAR(256),
-        AIRCRAFT_TYPE   NVARCHAR(64),
-        UPLOADED_AT     TIMESTAMP     NOT NULL
-    )
-    """,
-
-    # ---- Manual chunks + vector embeddings ---------------
-    f"""
-    CREATE TABLE MANUAL_CHUNKS (
-        CHUNK_ID        NVARCHAR(36)  PRIMARY KEY,
-        MANUAL_ID       NVARCHAR(36)  NOT NULL,
-        CHUNK_INDEX     INTEGER       NOT NULL,
-        CONTENT         NCLOB         NOT NULL,
-        EMBEDDING       REAL_VECTOR({EMBEDDING_DIM}),
-        CREATED_AT      TIMESTAMP     NOT NULL,
-        CONSTRAINT FK_CHUNK_MANUAL FOREIGN KEY (MANUAL_ID)
-            REFERENCES MANUALS(MANUAL_ID)
-    )
-    """,
-
-    # ---- Structured maintenance records (SAP-ready) ------
-    """
-    CREATE TABLE MAINTENANCE_RECORDS (
-        RECORD_ID           NVARCHAR(36)  PRIMARY KEY,
-        AIRCRAFT_REG        NVARCHAR(32),
-        COMPONENT           NVARCHAR(128),
-        FINDING             NCLOB,
-        SEVERITY            NVARCHAR(32),
-        LOCATION            NVARCHAR(128),
-        RECOMMENDED_ACTION  NCLOB,
-        TECHNICIAN          NVARCHAR(128),
-        INSPECTION_TS       TIMESTAMP,
-        STATUS              NVARCHAR(32) DEFAULT 'OPEN',
-        CREATED_AT          TIMESTAMP     NOT NULL
-    )
-    """,
-
-    # ---- Raw conversation turns (technician <-> AI) ------
-    """
-    CREATE TABLE CONVERSATIONS (
-        MESSAGE_ID      NVARCHAR(36)  PRIMARY KEY,
-        RECORD_ID       NVARCHAR(36),
-        ROLE            NVARCHAR(16)  NOT NULL,
-        MESSAGE         NCLOB         NOT NULL,
-        CREATED_AT      TIMESTAMP     NOT NULL,
-        CONSTRAINT FK_CONV_RECORD FOREIGN KEY (RECORD_ID)
-            REFERENCES MAINTENANCE_RECORDS(RECORD_ID)
-    )
-    """,
-]
+# NOTE: This module deliberately contains no CREATE TABLE / DDL.
+#
+# On HDI-container-backed HANA Cloud instances, the bound runtime
+# user (typically named "<container>_<token>_RT") only ever has
+# DML rights (SELECT/INSERT/UPDATE/DELETE) on its own schema - it
+# cannot run DDL under any circumstances, even with a GRANT from
+# an admin. Tables must instead be created once, out of band, by
+# running the project's schema.sql (see project root) through a
+# privileged connection such as SAP HANA Database Explorer opened
+# from BTP Cockpit.
+#
+# init_db() below therefore only *verifies* the expected tables
+# are present and gives a clear, actionable error if they are not,
+# rather than attempting to create them itself.
 
 _TABLE_NAMES = ["MANUALS", "MANUAL_CHUNKS", "MAINTENANCE_RECORDS", "CONVERSATIONS"]
+
+
+class SchemaNotReadyError(RuntimeError):
+    """Raised when required tables are missing and must be created manually."""
 
 
 def _table_exists(conn, table_name: str) -> bool:
@@ -199,20 +161,25 @@ def _table_exists(conn, table_name: str) -> bool:
 
 def init_db() -> None:
     """
-    Create every required table if it does not already exist.
+    Verify that every required table already exists in HANA_SCHEMA.
 
-    Safe to call on every application startup - existing tables
-    are left untouched.
+    This does NOT create tables - see the module note above. If any
+    table is missing, raises SchemaNotReadyError with instructions
+    for creating it manually via schema.sql.
     """
     with get_connection() as conn:
-        for table_name, statement in zip(_TABLE_NAMES, _SCHEMA_STATEMENTS):
-            if _table_exists(conn, table_name):
-                logger.info("Table %s already exists - skipping", table_name)
-                continue
-            logger.info("Creating table %s", table_name)
-            _execute(conn, statement)
-        conn.commit()
-    logger.info("Database schema is ready in schema '%s'", HANA_SCHEMA)
+        missing = [name for name in _TABLE_NAMES if not _table_exists(conn, name)]
+
+    if missing:
+        raise SchemaNotReadyError(
+            f"Missing table(s) in schema '{HANA_SCHEMA}': {', '.join(missing)}. "
+            "This app's database user only has DML rights and cannot create "
+            "tables itself. Run the project's schema.sql once via a privileged "
+            "connection (e.g. SAP HANA Database Explorer opened from BTP "
+            "Cockpit), then re-run this."
+        )
+
+    logger.info("Schema verified: all required tables present in '%s'", HANA_SCHEMA)
 
 
 # ==========================================================

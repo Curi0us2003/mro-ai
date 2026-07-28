@@ -1,0 +1,673 @@
+/* ==============================================================
+   AI Maintenance Voice Copilot - Stylesheet
+   --------------------------------------------------------------
+   Design tokens follow the SAP Fiori / Horizon visual language:
+   brand blue accents, a navy shell bar, neutral canvas gray,
+   and SAP's semantic colors for status (green/orange/red).
+   The one bold element is the voice "mic" control - everything
+   else stays quiet, tabular, and utilitarian by design, since
+   this is a working tool used with gloves on, not a showcase.
+============================================================== */
+
+:root {
+  /* Brand */
+  --color-brand: #0a6ed1;
+  --color-brand-dark: #0854a0;
+  --color-brand-darker: #073b70;
+
+  /* Shell / navy */
+  --color-shell: #354a5f;
+  --color-shell-text: #ffffff;
+
+  /* Neutrals */
+  --color-canvas: #f5f6f7;
+  --color-surface: #ffffff;
+  --color-border: #d9d9d9;
+  --color-border-strong: #bfc4c9;
+  --color-text: #1d2d3e;
+  --color-text-muted: #6a6d70;
+
+  /* Semantic (SAP-style) */
+  --color-success: #107e3e;
+  --color-success-bg: #e6f3ea;
+  --color-warning: #e9730c;
+  --color-warning-bg: #fdf1e6;
+  --color-error: #bb0000;
+  --color-error-bg: #fbe9e9;
+  --color-neutral-bg: #eef0f2;
+
+  /* Type */
+  --font-family: "Segoe UI", Arial, "Helvetica Neue", sans-serif;
+
+  /* Radius / shadow */
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow-card: 0 1px 2px rgba(29, 45, 62, 0.08), 0 1px 6px rgba(29, 45, 62, 0.06);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-family);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/* ==============================================================
+   Shell bar
+============================================================== */
+
+.shell-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-shell);
+  color: var(--color-shell-text);
+  padding: 0 20px;
+  height: 48px;
+}
+
+.shell-bar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.1px;
+}
+
+.shell-bar__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: var(--color-brand);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+
+.role-switch {
+  display: flex;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+
+.role-switch__btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.role-switch__btn:hover {
+  color: #ffffff;
+}
+
+.role-switch__btn.is-active {
+  background: var(--color-brand);
+  color: #ffffff;
+}
+
+/* ==============================================================
+   Layout
+============================================================== */
+
+.app-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 20px 60px;
+}
+
+.view { display: none; }
+.view.is-active { display: block; }
+
+/* ==============================================================
+   Panels / typography
+============================================================== */
+
+.panel__title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--color-text);
+}
+
+.panel__hint {
+  color: var(--color-text-muted);
+  margin: 0 0 18px;
+  font-size: 13px;
+}
+
+.panel__header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.panel--start {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 24px;
+  max-width: 480px;
+  margin: 40px auto;
+}
+
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+
+.field-error {
+  color: var(--color-error);
+  font-size: 12px;
+  margin: 8px 0 0;
+  min-height: 16px;
+}
+
+/* ==============================================================
+   Form controls
+============================================================== */
+
+.text-input {
+  flex: 1;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.text-input:focus {
+  border-color: var(--color-brand);
+}
+
+.text-input--small {
+  flex: none;
+  width: 220px;
+}
+
+.btn {
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--color-brand);
+  color: #ffffff;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--color-brand-dark);
+}
+
+.btn--secondary {
+  background: var(--color-surface);
+  color: var(--color-brand);
+  border: 1px solid var(--color-brand);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: #eaf2fc;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--color-neutral-bg);
+}
+
+.btn--small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.btn--full {
+  width: 100%;
+  margin-top: 16px;
+}
+
+/* ==============================================================
+   Technician workspace
+============================================================== */
+
+.workspace__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.session-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.session-info__label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-text-muted);
+}
+
+.session-info__value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* --- Voice hero (signature element) --- */
+
+.voice-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 0 20px;
+}
+
+.mic-btn {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-brand);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(10, 110, 209, 0.35);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.mic-btn:hover {
+  background: var(--color-brand-dark);
+}
+
+.mic-btn:active {
+  transform: scale(0.97);
+}
+
+.mic-btn__icon {
+  width: 34px;
+  height: 34px;
+  position: relative;
+  z-index: 1;
+}
+
+.mic-btn__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--color-brand);
+  opacity: 0;
+}
+
+.mic-btn.is-recording {
+  background: var(--color-error);
+  box-shadow: 0 4px 14px rgba(187, 0, 0, 0.35);
+}
+
+.mic-btn.is-recording .mic-btn__ring {
+  border-color: var(--color-error);
+  animation: mic-pulse 1.4s ease-out infinite;
+  opacity: 1;
+}
+
+.mic-btn.is-busy {
+  background: var(--color-text-muted);
+  cursor: wait;
+  box-shadow: none;
+}
+
+@keyframes mic-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mic-btn.is-recording .mic-btn__ring { animation: none; opacity: 0.4; }
+  .mic-btn { transition: none; }
+}
+
+.voice-hero__status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  min-height: 18px;
+}
+
+/* --- Text fallback --- */
+
+.text-fallback {
+  display: flex;
+  gap: 10px;
+  max-width: 520px;
+  margin: 0 auto 28px;
+}
+
+/* --- Grid: transcript + record card --- */
+
+.workspace__grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .workspace__grid { grid-template-columns: 1fr; }
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 18px 20px;
+}
+
+.card__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.card__header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.card__header-row .card__title { margin: 0; }
+
+/* --- Transcript --- */
+
+.transcript {
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transcript__empty {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.transcript-turn {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.transcript-turn--technician {
+  align-self: flex-end;
+  background: var(--color-brand);
+  color: #ffffff;
+  border-bottom-right-radius: 2px;
+}
+
+.transcript-turn--assistant {
+  align-self: flex-start;
+  background: var(--color-neutral-bg);
+  color: var(--color-text);
+  border-bottom-left-radius: 2px;
+}
+
+.transcript-turn__label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  opacity: 0.7;
+  margin-bottom: 3px;
+}
+
+/* --- Record status card --- */
+
+.status-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--color-neutral-bg);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.status-pill--open {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.status-pill--complete {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.record-fields {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.record-fields__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.record-fields__row:last-child { border-bottom: none; }
+
+.record-fields dt {
+  color: var(--color-text-muted);
+  flex: 0 0 auto;
+}
+
+.record-fields dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 500;
+  max-width: 60%;
+}
+
+.record-fields dd.is-empty {
+  color: var(--color-border-strong);
+  font-weight: 400;
+}
+
+/* Severity coloring inside the record card */
+.severity--minor    { color: var(--color-success); }
+.severity--major     { color: var(--color-warning); }
+.severity--critical,
+.severity--aog       { color: var(--color-error); }
+
+/* ==============================================================
+   Supervisor view
+============================================================== */
+
+.supervisor-toolbar {
+  display: flex;
+  gap: 10px;
+}
+
+.records-layout {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .records-layout { grid-template-columns: 1fr; }
+}
+
+.card--records-table {
+  padding: 0;
+  overflow: hidden;
+}
+
+.records-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.records-table thead th {
+  text-align: left;
+  background: var(--color-neutral-bg);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.records-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.records-table tbody tr:last-child td { border-bottom: none; }
+
+.records-table tbody tr {
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.records-table tbody tr:hover {
+  background: #f2f7fd;
+}
+
+.records-table tbody tr.is-selected {
+  background: #eaf2fc;
+}
+
+.records-table__empty {
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 24px;
+  cursor: default;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.badge--minor    { background: var(--color-success-bg); color: var(--color-success); }
+.badge--major     { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge--critical,
+.badge--aog       { background: var(--color-error-bg);   color: var(--color-error); }
+.badge--default   { background: var(--color-neutral-bg); color: var(--color-text-muted); }
+
+.card--record-detail {
+  min-height: 200px;
+}
+
+.record-detail__placeholder {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.record-detail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.record-detail__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+
+.record-detail__subtitle {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.record-detail__section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--color-text-muted);
+  margin: 18px 0 6px;
+}
+
+.record-detail__conversation {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
