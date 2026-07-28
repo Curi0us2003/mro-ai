@@ -69,6 +69,10 @@ LOG_FOLDER = PROJECT_ROOT / "logs"
 
 FRONTEND_FOLDER = PROJECT_ROOT / "frontend"
 
+# Generated voice replies (text-to-speech output) live here,
+# separate from technician-uploaded recordings in UPLOADS_FOLDER.
+AUDIO_OUTPUT_FOLDER = PROJECT_ROOT / "audio_output"
+
 # Create folders automatically
 
 for folder in (
@@ -76,6 +80,7 @@ for folder in (
     REPORTS_FOLDER,
     UPLOADS_FOLDER,
     LOG_FOLDER,
+    AUDIO_OUTPUT_FOLDER,
 ):
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -147,6 +152,25 @@ AZURE_EMBEDDING_MODEL = os.getenv(
 AZURE_API_VERSION = os.getenv(
     "AZURE_API_VERSION",
     "2024-05-01-preview"
+)
+
+# Azure OpenAI audio deployments (Speech-to-Text / Text-to-Speech).
+# These are separate deployment names on the same Azure OpenAI
+# resource defined above (same AZURE_OPENAI_URL / AZURE_API_KEY).
+
+AZURE_STT_MODEL = os.getenv(
+    "AZURE_STT_MODEL",
+    "whisper-1"
+)
+
+AZURE_TTS_MODEL = os.getenv(
+    "AZURE_TTS_MODEL",
+    "tts-1"
+)
+
+AZURE_TTS_VOICE = os.getenv(
+    "AZURE_TTS_VOICE",
+    "alloy"
 )
 
 # ==========================================================
