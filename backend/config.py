@@ -1,10 +1,7 @@
 """
 ==============================================================
-
 AI Maintenance Voice Copilot
-
 Configuration Module
-
 --------------------------------------------------------------
 
 Purpose
@@ -16,8 +13,9 @@ Responsibilities
 • Load environment variables from .env
 • Define project directories
 • Create required folders if they don't exist
-• Store SAP HANA configuration
-• Store Azure OpenAI configuration
+• Store SAP HANA Cloud configuration
+• Store SAP AI Core / Generative AI Hub configuration
+• Store Piper text-to-speech configuration
 • Store application constants
 
 IMPORTANT
@@ -28,8 +26,19 @@ Every module should simply import from config.py.
 
 Example:
 
-from backend.config import HANA_HOST
+    from backend.config import HANA_HOST
 
+Model hosting
+-------------
+Every model now comes from SAP BTP:
+
+    embeddings      text-embedding-3-large   (AI Core / Gen AI Hub)
+    chat            gpt-4.1                  (AI Core / Gen AI Hub)
+    speech-to-text  gemini-2.5-flash         (AI Core / Gen AI Hub)
+
+Text-to-speech runs locally with Piper, because the generative
+AI hub does not offer a text-to-speech model. Nothing in this
+application talks to Azure OpenAI any more.
 ==============================================================
 """
 
@@ -73,6 +82,9 @@ FRONTEND_FOLDER = PROJECT_ROOT / "frontend"
 # separate from technician-uploaded recordings in UPLOADS_FOLDER.
 AUDIO_OUTPUT_FOLDER = PROJECT_ROOT / "audio_output"
 
+# Piper voice models (.onnx + .onnx.json) live here.
+VOICES_FOLDER = PROJECT_ROOT / "voices"
+
 # Create folders automatically
 
 for folder in (
@@ -81,6 +93,7 @@ for folder in (
     UPLOADS_FOLDER,
     LOG_FOLDER,
     AUDIO_OUTPUT_FOLDER,
+    VOICES_FOLDER,
 ):
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -90,15 +103,36 @@ for folder in (
 
 APP_NAME = "AI Maintenance Voice Copilot"
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 
 HOST = "0.0.0.0"
 
-PORT = 5000
+PORT = int(os.getenv("PORT", "5000"))
 
 SECRET_KEY = os.getenv("SECRET_KEY", "")
+
+# ==========================================================
+# Authentication / Sessions
+# ==========================================================
+# Login sessions are signed cookies (Flask's own session, signed
+# with SECRET_KEY). There is no self-service registration: user
+# accounts are created only by an administrator running
+#     python -m backend.scripts.manage_users add ...
+
+SESSION_LIFETIME_HOURS = int(os.getenv("SESSION_LIFETIME_HOURS", "12"))
+
+# Set to true once you serve the app over HTTPS.
+SESSION_COOKIE_SECURE = (
+    os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
+)
+
+ROLE_TECHNICIAN = "TECHNICIAN"
+
+ROLE_SUPERVISOR = "SUPERVISOR"
+
+VALID_ROLES = (ROLE_TECHNICIAN, ROLE_SUPERVISOR)
 
 # ==========================================================
 # SAP HANA Cloud
@@ -129,49 +163,79 @@ HANA_HDI_USER = os.getenv("HANA_HDI_USER", "")
 HANA_HDI_PASSWORD = os.getenv("HANA_HDI_PASSWORD", "")
 
 # ==========================================================
-# Azure OpenAI
+# SAP AI Core / Generative AI Hub
 # ==========================================================
+# From the service key of your "aicore" service instance:
+#     clientid                       -> AICORE_CLIENT_ID
+#     clientsecret                   -> AICORE_CLIENT_SECRET
+#     url                            -> AICORE_AUTH_URL
+#     serviceurls.AI_API_URL + "/v2" -> AICORE_BASE_URL
 
-AZURE_OPENAI_URL = os.getenv("AZURE_OPENAI_URL", "")
+AICORE_CLIENT_ID = os.getenv("AICORE_CLIENT_ID", "")
 
-AZURE_API_KEY = os.getenv("AZURE_API_KEY", "")
+AICORE_CLIENT_SECRET = os.getenv("AICORE_CLIENT_SECRET", "")
 
-# If later you move to separate deployments,
-# these values are already available.
+AICORE_AUTH_URL = os.getenv("AICORE_AUTH_URL", "")
 
-AZURE_CHAT_MODEL = os.getenv(
-    "AZURE_CHAT_MODEL",
-    "gpt-4.1"
+AICORE_BASE_URL = os.getenv("AICORE_BASE_URL", "")
+
+AICORE_RESOURCE_GROUP = os.getenv("AICORE_RESOURCE_GROUP", "default")
+
+# generative-ai-hub-sdk reads its credentials from the process
+# environment when it creates a proxy client. This module is the
+# only place in the project allowed to write environment variables,
+# for the same reason it is the only place allowed to read them.
+
+for _key, _value in (
+    ("AICORE_CLIENT_ID", AICORE_CLIENT_ID),
+    ("AICORE_CLIENT_SECRET", AICORE_CLIENT_SECRET),
+    ("AICORE_AUTH_URL", AICORE_AUTH_URL),
+    ("AICORE_BASE_URL", AICORE_BASE_URL),
+    ("AICORE_RESOURCE_GROUP", AICORE_RESOURCE_GROUP),
+):
+    if _value:
+        os.environ[_key] = _value
+
+# ----------------------------------------------------------
+# Models deployed in the generative AI hub
+# ----------------------------------------------------------
+# Each must exist as a RUNNING deployment in AI Core. Being
+# listed in the model catalogue is not enough.
+
+AICORE_CHAT_MODEL = os.getenv("AICORE_CHAT_MODEL", "gpt-4.1")
+
+AICORE_EMBEDDING_MODEL = os.getenv(
+    "AICORE_EMBEDDING_MODEL",
+    "text-embedding-3-large",
 )
 
-AZURE_EMBEDDING_MODEL = os.getenv(
-    "AZURE_EMBEDDING_MODEL",
-    "text-embedding-3-small"
-)
+# Gemini is the only speech-capable family in the hub. Swap to
+# gemini-3.5-flash once you have confirmed it deploys in your region.
+AICORE_STT_MODEL = os.getenv("AICORE_STT_MODEL", "gemini-2.5-flash")
 
-AZURE_API_VERSION = os.getenv(
-    "AZURE_API_VERSION",
-    "2024-05-01-preview"
-)
+# Optional: target a deployment directly by its 16-character ID
+# (shown as the deployment title in AI Launchpad) instead of
+# letting the SDK resolve the model by name.
 
-# Azure OpenAI audio deployments (Speech-to-Text / Text-to-Speech).
-# These are separate deployment names on the same Azure OpenAI
-# resource defined above (same AZURE_OPENAI_URL / AZURE_API_KEY).
+AICORE_CHAT_DEPLOYMENT_ID = os.getenv("AICORE_CHAT_DEPLOYMENT_ID", "")
 
-AZURE_STT_MODEL = os.getenv(
-    "AZURE_STT_MODEL",
-    "whisper-1"
-)
+AICORE_EMBEDDING_DEPLOYMENT_ID = os.getenv("AICORE_EMBEDDING_DEPLOYMENT_ID", "")
 
-AZURE_TTS_MODEL = os.getenv(
-    "AZURE_TTS_MODEL",
-    "tts-1"
-)
+AICORE_STT_DEPLOYMENT_ID = os.getenv("AICORE_STT_DEPLOYMENT_ID", "")
 
-AZURE_TTS_VOICE = os.getenv(
-    "AZURE_TTS_VOICE",
-    "alloy"
-)
+# ----------------------------------------------------------
+# Embedding vector width
+# ----------------------------------------------------------
+# text-embedding-3-large natively returns 3072 dimensions but
+# supports truncation, so 1536 halves storage at almost no
+# retrieval-quality cost. This value MUST match the width of
+# MANUAL_CHUNKS.EMBEDDING in schema.sql - REAL_VECTOR width
+# cannot be altered after the table is created.
+
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
+
+# How many chunks to send per embedding request during ingestion.
+EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
 
 # ==========================================================
 # Voice Configuration
@@ -191,6 +255,35 @@ SUPPORTED_AUDIO_FORMATS = [
     "webm",
 ]
 
+# ----------------------------------------------------------
+# Piper text-to-speech (runs locally, no cloud call)
+# ----------------------------------------------------------
+# Download a voice from the Piper voices release and drop both
+# files into the voices/ folder:
+#     en_US-lessac-medium.onnx
+#     en_US-lessac-medium.onnx.json
+
+PIPER_VOICE_NAME = os.getenv("PIPER_VOICE_NAME", "en_US-lessac-medium")
+
+PIPER_MODEL_PATH = Path(
+    os.getenv("PIPER_MODEL_PATH", str(VOICES_FOLDER / f"{PIPER_VOICE_NAME}.onnx"))
+)
+
+PIPER_CONFIG_PATH = Path(
+    os.getenv("PIPER_CONFIG_PATH", str(PIPER_MODEL_PATH) + ".json")
+)
+
+# Speaking rate. Piper's length_scale is inverse to speed:
+# higher = slower. 1.0 is the voice's natural pace.
+PIPER_LENGTH_SCALE = float(os.getenv("PIPER_LENGTH_SCALE", "1.0"))
+
+# Extra silence inserted at sentence boundaries, in seconds.
+PIPER_SENTENCE_SILENCE = float(os.getenv("PIPER_SENTENCE_SILENCE", "0.35"))
+
+# Piper writes WAV. Keep it - the browser plays it natively and
+# there is no transcoding dependency.
+TTS_OUTPUT_FORMAT = "wav"
+
 # ==========================================================
 # Manual Ingestion
 # ==========================================================
@@ -200,6 +293,11 @@ CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 200
 
 TOP_K_RESULTS = 5
+
+# Retrieved chunks scoring below this are treated as irrelevant.
+# Cosine similarity always returns the top-k, even when nothing
+# in the manuals is actually related to the question.
+MIN_RELEVANCE_SCORE = float(os.getenv("MIN_RELEVANCE_SCORE", "0.30"))
 
 # ==========================================================
 # PDF Settings
@@ -213,7 +311,7 @@ PDF_TITLE = "Aircraft Maintenance Report"
 # Logging
 # ==========================================================
 
-LOG_LEVEL = "INFO"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 LOG_FILE = LOG_FOLDER / "application.log"
 
@@ -226,9 +324,11 @@ REQUIRED_ENV_VARS = {
     "HANA_USER": HANA_USER,
     "HANA_PASSWORD": HANA_PASSWORD,
     "HANA_SCHEMA": HANA_SCHEMA,
-    "AZURE_OPENAI_URL": AZURE_OPENAI_URL,
-    "AZURE_API_KEY": AZURE_API_KEY,
     "SECRET_KEY": SECRET_KEY,
+    "AICORE_CLIENT_ID": AICORE_CLIENT_ID,
+    "AICORE_CLIENT_SECRET": AICORE_CLIENT_SECRET,
+    "AICORE_AUTH_URL": AICORE_AUTH_URL,
+    "AICORE_BASE_URL": AICORE_BASE_URL,
 }
 
 missing = [

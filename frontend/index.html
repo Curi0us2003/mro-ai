@@ -17,32 +17,56 @@
       <span class="shell-bar__title">AI Maintenance Voice Copilot</span>
     </div>
 
-    <nav class="role-switch" role="tablist" aria-label="Select view">
-      <button class="role-switch__btn is-active" id="tab-technician" role="tab" aria-selected="true">
-        Technician
-      </button>
-      <button class="role-switch__btn" id="tab-supervisor" role="tab" aria-selected="false">
-        Supervisor
-      </button>
-    </nav>
+    <div class="shell-bar__end" id="shell-user" hidden>
+      <span class="shell-user__name" id="shell-user-name">—</span>
+      <span class="shell-user__role" id="shell-user-role">—</span>
+      <button class="btn btn--ghost btn--small btn--on-dark" id="btn-sign-out">Sign out</button>
+    </div>
   </header>
 
   <main class="app-main">
 
     <!-- ============================================================
+         LOGIN
+         Accounts are provisioned by an administrator. There is no
+         sign-up path here, on purpose.
+    ============================================================= -->
+    <section id="view-login" class="view is-active">
+      <form class="panel panel--login" id="form-login">
+        <h1 class="panel__title">Sign in</h1>
+        <p class="panel__hint">Use the account your maintenance administrator issued you.</p>
+
+        <label class="field-label" for="input-username">Username</label>
+        <input type="text" id="input-username" class="text-input text-input--block"
+               autocomplete="username" autocapitalize="off" autocorrect="off"
+               spellcheck="false" maxlength="64" required>
+
+        <label class="field-label" for="input-password">Password</label>
+        <input type="password" id="input-password" class="text-input text-input--block"
+               autocomplete="current-password" maxlength="256" required>
+
+        <button type="submit" class="btn btn--primary btn--full" id="btn-login">Sign in</button>
+        <p class="field-error" id="login-error" role="alert"></p>
+
+        <p class="panel__footnote">
+          No account? Accounts are created by your administrator — they can't be self-registered.
+        </p>
+      </form>
+    </section>
+
+    <!-- ============================================================
          TECHNICIAN VIEW
     ============================================================= -->
-    <section id="view-technician" class="view is-active">
+    <section id="view-technician" class="view">
 
       <!-- Start-session panel -->
       <div class="panel panel--start" id="panel-start">
         <h1 class="panel__title">Start an inspection</h1>
-        <p class="panel__hint">Enter your name to begin a new voice-guided maintenance session.</p>
-        <div class="field-row">
-          <input type="text" id="input-technician-name" class="text-input" placeholder="Technician name" maxlength="128">
-          <button class="btn btn--primary" id="btn-start-session">Start session</button>
-        </div>
-        <p class="field-error" id="start-session-error"></p>
+        <p class="panel__hint">
+          Begin a voice-guided session. Findings are recorded against your name automatically.
+        </p>
+        <button class="btn btn--primary btn--full" id="btn-start-session">Start session</button>
+        <p class="field-error" id="start-session-error" role="alert"></p>
       </div>
 
       <!-- Active session workspace -->
@@ -70,7 +94,8 @@
 
         <!-- Text fallback -->
         <form class="text-fallback" id="form-text-fallback">
-          <input type="text" id="input-text-message" class="text-input" placeholder="Or type instead of speaking…" autocomplete="off">
+          <input type="text" id="input-text-message" class="text-input"
+                 placeholder="Or type instead of speaking…" autocomplete="off">
           <button type="submit" class="btn btn--secondary">Send</button>
         </form>
 
@@ -78,7 +103,13 @@
 
           <!-- Transcript / conversation -->
           <div class="card card--transcript">
-            <h2 class="card__title">Conversation</h2>
+            <div class="card__header-row">
+              <h2 class="card__title">Conversation</h2>
+              <label class="toggle" for="toggle-speak">
+                <input type="checkbox" id="toggle-speak" checked>
+                <span>Read replies aloud</span>
+              </label>
+            </div>
             <div class="transcript" id="transcript" aria-live="polite">
               <p class="transcript__empty">Your conversation with the copilot will appear here.</p>
             </div>
@@ -118,7 +149,8 @@
       <div class="panel__header-row">
         <h1 class="panel__title">Maintenance records</h1>
         <div class="supervisor-toolbar">
-          <input type="text" id="input-filter-aircraft" class="text-input text-input--small" placeholder="Filter by aircraft reg.">
+          <input type="text" id="input-filter-aircraft" class="text-input text-input--small"
+                 placeholder="Filter by aircraft reg.">
           <button class="btn btn--secondary btn--small" id="btn-refresh-records">Refresh</button>
         </div>
       </div>
@@ -143,7 +175,9 @@
         </div>
 
         <div class="card card--record-detail" id="record-detail">
-          <p class="record-detail__placeholder">Select a record to view its full details and conversation transcript.</p>
+          <p class="record-detail__placeholder">
+            Select a record to view its full details and conversation transcript.
+          </p>
         </div>
       </div>
     </section>

@@ -9,11 +9,25 @@ Purpose
 Convert technician speech (recorded audio) into text so it can
 be handed to backend.agent.MaintenanceAgent for understanding.
 
+Provider
+--------
+Gemini, served through SAP AI Core / Generative AI Hub. Gemini
+is the only speech-capable model family in the hub - there is no
+Whisper deployment available there - so transcription is done by
+a multimodal model taking the audio as inline data.
+
+Because we lose Whisper's `prompt` parameter (which biased the
+decoder toward supplied vocabulary), the domain priming happens
+in the system instruction instead: we tell the model it is
+transcribing aviation maintenance speech and show it the shape of
+the identifiers it should expect. That recovers most of the
+accuracy on strings like "MS21042L3" or "ATA 32-41", which is
+exactly where generic ASR falls over.
+
 Responsibilities
 ----------------
 • Validate incoming audio (format, duration where determinable)
-• Transcribe audio files/bytes via Azure OpenAI's Whisper
-  deployment (same Azure OpenAI resource used for chat/embeddings)
+• Transcribe audio files/bytes via the deployed Gemini model
 • Persist uploaded recordings under UPLOADS_FOLDER
 
 IMPORTANT
@@ -32,28 +46,24 @@ Example
 
 from __future__ import annotations
 
-import io
 import logging
+import mimetypes
 import uuid
 import wave
 from pathlib import Path
 from typing import Optional, Union
 
-from openai import AzureOpenAI
-
 from backend.config import (
-    AZURE_OPENAI_URL,
-    AZURE_API_KEY,
-    AZURE_API_VERSION,
-    AZURE_STT_MODEL,
+    AICORE_STT_MODEL,
+    AICORE_STT_DEPLOYMENT_ID,
     UPLOADS_FOLDER,
     SUPPORTED_AUDIO_FORMATS,
     MAX_RECORDING_DURATION,
     LOG_LEVEL,
 )
 
-logging.basicConfig(level=LOG_LEVEL)
 logger = logging.getLogger("mro_copilot.speech_to_text")
+logger.setLevel(LOG_LEVEL)
 
 
 class UnsupportedAudioFormatError(ValueError):
@@ -64,16 +74,35 @@ class RecordingTooLongError(ValueError):
     """Raised when a recording exceeds MAX_RECORDING_DURATION seconds."""
 
 
+class TranscriptionError(RuntimeError):
+    """Raised when the speech-to-text provider fails."""
+
+
 # ==========================================================
-# Client
+# Domain priming
 # ==========================================================
 
-def get_azure_client() -> AzureOpenAI:
-    return AzureOpenAI(
-        azure_endpoint=AZURE_OPENAI_URL,
-        api_key=AZURE_API_KEY,
-        api_version=AZURE_API_VERSION,
-    )
+TRANSCRIPTION_INSTRUCTION = """\
+You are transcribing speech recorded by an aircraft maintenance technician,
+often in a noisy hangar.
+
+Transcribe exactly what was said. Output ONLY the transcript - no preamble,
+no commentary, no speaker labels, no timestamps, no quotation marks.
+
+Expect and preserve this vocabulary precisely:
+- Aircraft registrations: two to three letters, hyphen, letters, e.g. VT-ABC, N737QA
+- ATA chapter references spoken as digits, e.g. "ATA 32-41", "chapter 27 dash 51"
+- Part numbers mixing letters and digits with no spaces, e.g. MS21042L3, NAS1149F0332P
+- Torque values with units, e.g. "45 newton metres", "120 inch pounds"
+- Component names: actuator, bushing, fairing, spar, stringer, longeron, nacelle,
+  pylon, empennage, aileron, elevator, rudder, slat, flap, strut, bogie
+- Defect terms: corrosion, delamination, fretting, chafing, crazing, spalling,
+  scoring, pitting, exfoliation, hydraulic seepage, fuel weep
+
+Write alphanumeric part numbers with no internal spaces. Write registrations
+with a hyphen. Keep numbers as digits. If a passage is genuinely inaudible,
+write [inaudible] rather than guessing.
+"""
 
 
 # ==========================================================
@@ -122,6 +151,22 @@ def validate_recording_duration(path: Path) -> None:
         )
 
 
+def guess_mime_type(file_name: str) -> str:
+    """Map an audio file name to the MIME type Gemini expects."""
+    suffix = Path(file_name).suffix.lower().lstrip(".")
+    explicit = {
+        "wav": "audio/wav",
+        "mp3": "audio/mpeg",
+        "m4a": "audio/mp4",
+        "ogg": "audio/ogg",
+        "webm": "audio/webm",
+    }
+    if suffix in explicit:
+        return explicit[suffix]
+    guessed, _ = mimetypes.guess_type(file_name)
+    return guessed or "application/octet-stream"
+
+
 # ==========================================================
 # Persisting uploaded audio
 # ==========================================================
@@ -139,6 +184,58 @@ def save_uploaded_audio(audio_bytes: bytes, original_file_name: str) -> Path:
 
 
 # ==========================================================
+# Provider call
+# ==========================================================
+
+def _get_client():
+    """Google GenAI client wired through the AI Core proxy."""
+    from gen_ai_hub.proxy.core.proxy_clients import get_proxy_client
+    from gen_ai_hub.proxy.native.google_genai.clients import Client
+
+    return Client(proxy_client=get_proxy_client("gen-ai-hub"))
+
+
+def _transcribe_bytes(audio_bytes: bytes, mime_type: str, language: Optional[str]) -> str:
+    """Send audio to the deployed Gemini model and return the transcript."""
+    from google.genai import types
+
+    instruction = TRANSCRIPTION_INSTRUCTION
+    if language:
+        instruction += f"\nThe technician is speaking {language}. Transcribe in that language."
+
+    client = _get_client()
+    model = AICORE_STT_DEPLOYMENT_ID or AICORE_STT_MODEL
+
+    logger.info("Transcribing %d bytes (%s) via %s", len(audio_bytes), mime_type, model)
+
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                "Transcribe this recording.",
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=instruction,
+                temperature=0.0,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
+        raise TranscriptionError(f"Speech-to-text failed: {exc}") from exc
+
+    text = (getattr(response, "text", "") or "").strip()
+
+    # A multimodal model occasionally wraps its answer in quotes or
+    # prefixes it despite the instruction. Strip the common cases.
+    if text.startswith(("Transcript:", "TRANSCRIPT:")):
+        text = text.split(":", 1)[1].strip()
+    text = text.strip('"').strip()
+
+    logger.info("Transcription complete (%d characters)", len(text))
+    return text
+
+
+# ==========================================================
 # Transcription
 # ==========================================================
 
@@ -151,18 +248,11 @@ def transcribe_audio_file(path: Union[str, Path], language: Optional[str] = None
     validate_audio_format(path.name)
     validate_recording_duration(path)
 
-    client = get_azure_client()
-    logger.info("Transcribing %s via Azure OpenAI (%s)", path.name, AZURE_STT_MODEL)
-
-    with open(path, "rb") as audio_file:
-        kwargs = {"model": AZURE_STT_MODEL, "file": audio_file}
-        if language:
-            kwargs["language"] = language
-        response = client.audio.transcriptions.create(**kwargs)
-
-    text = (response.text or "").strip()
-    logger.info("Transcription complete (%d characters)", len(text))
-    return text
+    return _transcribe_bytes(
+        path.read_bytes(),
+        guess_mime_type(path.name),
+        language,
+    )
 
 
 def transcribe_audio_bytes(
@@ -179,20 +269,14 @@ def transcribe_audio_bytes(
     If `persist` is True (default), the audio is also saved under
     UPLOADS_FOLDER for auditing/replay purposes.
     """
-    suffix = validate_audio_format(original_file_name)
+    validate_audio_format(original_file_name)
 
     if persist:
         path = save_uploaded_audio(audio_bytes, original_file_name)
         return transcribe_audio_file(path, language=language)
 
-    # Transient transcription without saving to disk.
-    client = get_azure_client()
-    buffer = io.BytesIO(audio_bytes)
-    buffer.name = f"audio.{suffix}"  # the SDK reads this for content-type hints
-
-    kwargs = {"model": AZURE_STT_MODEL, "file": buffer}
-    if language:
-        kwargs["language"] = language
-
-    response = client.audio.transcriptions.create(**kwargs)
-    return (response.text or "").strip()
+    return _transcribe_bytes(
+        audio_bytes,
+        guess_mime_type(original_file_name),
+        language,
+    )

@@ -7,6 +7,9 @@
    The one bold element is the voice "mic" control - everything
    else stays quiet, tabular, and utilitarian by design, since
    this is a working tool used with gloves on, not a showcase.
+
+   The role switch is gone: which view you get is decided by the
+   account you signed in with, not by a tab you can click.
 ============================================================== */
 
 :root {
@@ -105,31 +108,34 @@ button {
   font-size: 14px;
 }
 
-.role-switch {
+.shell-bar__end {
   display: flex;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-sm);
-  padding: 2px;
+  align-items: center;
+  gap: 12px;
 }
 
-.role-switch__btn {
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.75);
-  padding: 6px 16px;
+.shell-user__name {
   font-size: 13px;
   font-weight: 600;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.role-switch__btn:hover {
-  color: #ffffff;
+.shell-user__role {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.role-switch__btn.is-active {
-  background: var(--color-brand);
+.btn--on-dark {
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.btn--on-dark:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
 }
 
@@ -163,6 +169,14 @@ button {
   font-size: 13px;
 }
 
+.panel__footnote {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
 .panel__header-row {
   display: flex;
   align-items: flex-end;
@@ -172,14 +186,32 @@ button {
   margin-bottom: 18px;
 }
 
-.panel--start {
+.panel--start,
+.panel--login {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
   padding: 24px;
+  max-width: 400px;
+  margin: 48px auto;
+}
+
+.panel--start {
   max-width: 480px;
   margin: 40px auto;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin: 0 0 5px;
+}
+
+.field-label + .text-input {
+  margin-bottom: 14px;
 }
 
 .field-row {
@@ -210,6 +242,11 @@ button {
 
 .text-input:focus {
   border-color: var(--color-brand);
+}
+
+.text-input--block {
+  display: block;
+  width: 100%;
 }
 
 .text-input--small {
@@ -269,7 +306,22 @@ button {
 
 .btn--full {
   width: 100%;
-  margin-top: 16px;
+  margin-top: 8px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle input {
+  accent-color: var(--color-brand);
+  margin: 0;
 }
 
 /* ==============================================================
@@ -670,4 +722,8 @@ button {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.record-detail__conversation .transcript-turn {
+  max-width: 100%;
 }

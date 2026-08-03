@@ -7,8 +7,9 @@ AI Reasoning Layer (Agent)
 Purpose
 -------
 This module implements the conversational "co-pilot" that talks
-to the technician. It is powered by Azure OpenAI (GPT-4.1) and
-uses function/tool calling to:
+to the technician. It is powered by a chat model deployed in SAP
+AI Core (gpt-4.1 by default), reached through the Generative AI
+Hub proxy, and uses function/tool calling to:
 
     • Ask contextual follow-up questions until a maintenance
       finding is complete (aircraft, component, finding,
@@ -32,13 +33,15 @@ Responsibilities
 IMPORTANT
 ---------
 This module never reads environment variables directly.
-All settings come from backend.config.
+All settings come from backend.config. Embeddings come from
+backend.embeddings - the agent does not call a model provider
+itself for anything except chat completion.
 
 Example
 -------
     from backend.agent import MaintenanceAgent
 
-    agent = MaintenanceAgent(technician="J. Smith")
+    agent = MaintenanceAgent(technician="J. Smith", user_id="...")
     reply = agent.send("Found corrosion on the left turbine blade.")
     print(reply)
 ==============================================================
@@ -51,17 +54,14 @@ import logging
 import uuid
 from typing import Any, Optional
 
-from openai import AzureOpenAI
-
 from backend.config import (
-    AZURE_OPENAI_URL,
-    AZURE_API_KEY,
-    AZURE_API_VERSION,
-    AZURE_CHAT_MODEL,
-    AZURE_EMBEDDING_MODEL,
+    AICORE_CHAT_MODEL,
+    AICORE_CHAT_DEPLOYMENT_ID,
     TOP_K_RESULTS,
+    MIN_RELEVANCE_SCORE,
     LOG_LEVEL,
 )
+from backend.embeddings import embed_query
 from backend.database import (
     semantic_search,
     insert_maintenance_record,
@@ -70,8 +70,8 @@ from backend.database import (
     insert_conversation_message,
 )
 
-logging.basicConfig(level=LOG_LEVEL)
 logger = logging.getLogger("mro_copilot.agent")
+logger.setLevel(LOG_LEVEL)
 
 # ==========================================================
 # System Prompt
@@ -96,11 +96,15 @@ Your job:
    intervals, part numbers, procedures, prior repair history, troubleshooting),
    call `search_maintenance_knowledge` to look it up in the ingested aircraft
    manuals before answering. Only answer from what the search returns -
-   if nothing relevant is found, say so honestly instead of guessing.
-5. Keep replies short, spoken-style, and technical-but-plain - this is read
+   if nothing relevant is found, say so honestly instead of guessing, and say
+   what would be needed to answer it.
+5. Cite the source of any manual-derived fact as [file, p.N]. Quote exact
+   figures, torque values, part numbers and step numbers verbatim rather
+   than paraphrasing them.
+6. Keep replies short, spoken-style, and technical-but-plain - this is read
    aloud to someone wearing gloves and possibly holding a tool, not read on
-   a screen.
-6. Once every required field is captured, confirm the finding back to the
+   a screen. Two or three sentences is usually right.
+7. Once every required field is captured, confirm the finding back to the
    technician in one sentence and let them know the record has been saved.
 
 Never fabricate torque specs, part numbers, or procedures - only state facts
@@ -118,7 +122,7 @@ REQUIRED_FIELDS = [
 ]
 
 # ==========================================================
-# Tool Schema (OpenAI / Azure OpenAI function-calling format)
+# Tool Schema (OpenAI-compatible function-calling format)
 # ==========================================================
 
 TOOLS = [
@@ -137,7 +141,10 @@ TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The technician's question, or a short search query capturing what they need to know.",
+                        "description": (
+                            "The technician's question, or a short search query "
+                            "capturing what they need to know."
+                        ),
                     },
                     "top_k": {
                         "type": "integer",
@@ -183,11 +190,35 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_current_record",
-            "description": "Retrieve the current state of the maintenance record being built in this conversation.",
+            "description": (
+                "Retrieve the current state of the maintenance record being "
+                "built in this conversation."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },
 ]
+
+
+# ==========================================================
+# Chat completion through the AI Core proxy
+# ==========================================================
+
+def _chat_completion(messages: list[dict], tools: Optional[list] = None, temperature: float = 0.2):
+    from gen_ai_hub.proxy.native.openai import chat
+
+    kwargs: dict = {"messages": messages, "temperature": temperature}
+
+    if AICORE_CHAT_DEPLOYMENT_ID:
+        kwargs["deployment_id"] = AICORE_CHAT_DEPLOYMENT_ID
+    else:
+        kwargs["model_name"] = AICORE_CHAT_MODEL
+
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    return chat.completions.create(**kwargs)
 
 
 # ==========================================================
@@ -199,9 +230,9 @@ class MaintenanceAgent:
     One instance = one ongoing conversation / inspection session
     with a single technician.
 
-    Create a new instance per voice session (e.g. keyed by a
-    session id in your Flask app), and keep calling `.send()`
-    with each new transcribed technician utterance.
+    Create a new instance per voice session (keyed by a session id
+    in the Flask app), and keep calling `.send()` with each new
+    transcribed technician utterance.
     """
 
     def __init__(
@@ -209,22 +240,25 @@ class MaintenanceAgent:
         technician: Optional[str] = None,
         session_id: Optional[str] = None,
         record_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ):
         self.session_id = session_id or str(uuid.uuid4())
         self.technician = technician
         self.record_id = record_id
-
-        self.client = AzureOpenAI(
-            azure_endpoint=AZURE_OPENAI_URL,
-            api_key=AZURE_API_KEY,
-            api_version=AZURE_API_VERSION,
-        )
+        self.user_id = user_id
 
         self.messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         if technician:
             self.messages.append(
-                {"role": "system", "content": f"The technician's name is {technician}."}
+                {
+                    "role": "system",
+                    "content": (
+                        f"The technician's name is {technician}. It is already "
+                        "known - never ask for it, and pass it as the "
+                        "`technician` field when saving the record."
+                    ),
+                }
             )
 
     # ------------------------------------------------------
@@ -240,16 +274,9 @@ class MaintenanceAgent:
         self.messages.append({"role": "user", "content": technician_utterance})
 
         for _ in range(max_tool_iterations):
-            response = self.client.chat.completions.create(
-                model=AZURE_CHAT_MODEL,
-                messages=self.messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=0.2,
-            )
+            response = _chat_completion(self.messages, tools=TOOLS)
 
-            choice = response.choices[0]
-            message = choice.message
+            message = response.choices[0].message
 
             if not message.tool_calls:
                 reply = message.content or ""
@@ -277,7 +304,9 @@ class MaintenanceAgent:
             )
 
             for tool_call in message.tool_calls:
-                result = self._execute_tool(tool_call.function.name, tool_call.function.arguments)
+                result = self._execute_tool(
+                    tool_call.function.name, tool_call.function.arguments
+                )
                 self.messages.append(
                     {
                         "role": "tool",
@@ -289,7 +318,10 @@ class MaintenanceAgent:
         # Safety valve: if the model keeps calling tools without
         # ever producing a final answer, surface something sane.
         logger.warning("Max tool iterations reached for session %s", self.session_id)
-        fallback = "I've saved what you've told me so far - could you repeat or clarify your last point?"
+        fallback = (
+            "I've saved what you've told me so far - could you repeat or "
+            "clarify your last point?"
+        )
         insert_conversation_message("assistant", fallback, self.record_id)
         return fallback
 
@@ -331,17 +363,33 @@ class MaintenanceAgent:
         if not query:
             return {"error": "No query provided"}
 
-        embedding_response = self.client.embeddings.create(
-            model=AZURE_EMBEDDING_MODEL,
-            input=[query],
-        )
-        query_embedding = embedding_response.data[0].embedding
+        try:
+            query_embedding = embed_query(query)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Embedding the search query failed")
+            return {"error": f"Manual search is unavailable right now: {exc}"}
 
-        results = semantic_search(query_embedding, top_k=top_k)
+        results = semantic_search(
+            query_embedding,
+            top_k=top_k,
+            min_score=MIN_RELEVANCE_SCORE,
+        )
+
+        if not results:
+            return {
+                "results": [],
+                "note": (
+                    "No passage in the ingested manuals is relevant to this "
+                    "question. Tell the technician the manuals do not cover it "
+                    "rather than answering from general knowledge."
+                ),
+            }
+
         return {
             "results": [
                 {
                     "source": r["FILE_NAME"],
+                    "page": r.get("PAGE_NUMBER"),
                     "content": r["CONTENT"],
                     "relevance_score": round(float(r["SCORE"]), 4),
                 }
@@ -354,11 +402,17 @@ class MaintenanceAgent:
             arguments["technician"] = self.technician
 
         if not self.record_id:
-            self.record_id = insert_maintenance_record(**arguments)
+            self.record_id = insert_maintenance_record(
+                technician_user_id=self.user_id, **arguments
+            )
             return {"record_id": self.record_id, "created": True}
 
         update_maintenance_record(self.record_id, **arguments)
-        return {"record_id": self.record_id, "created": False, "updated_fields": list(arguments.keys())}
+        return {
+            "record_id": self.record_id,
+            "created": False,
+            "updated_fields": list(arguments.keys()),
+        }
 
     def _tool_get_current_record(self) -> dict:
         if not self.record_id:

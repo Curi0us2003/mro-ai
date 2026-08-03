@@ -6,6 +6,9 @@
 #   pip install -r requirements.txt --break-system-packages
 # (drop --break-system-packages if you're using a virtualenv,
 #  which is recommended: python -m venv .venv && source .venv/bin/activate)
+#
+# Every model except text-to-speech now comes from SAP BTP.
+# There is no Azure OpenAI dependency any more.
 # ==============================================================
 
 # --- Web framework (backend/app.py) --------------------------
@@ -18,12 +21,23 @@ python-dotenv==1.0.1
 # --- SAP HANA Cloud client (backend/database.py) ---------------
 hdbcli==2.23.27
 
-# --- Azure OpenAI (backend/agent.py, speech_to_text.py, -------
-# --- text_to_speech.py, scripts/ingest_manuals.py) -------------
-openai==1.60.0
+# --- SAP AI Core / Generative AI Hub --------------------------
+# Powers embeddings (backend/embeddings.py), chat (backend/agent.py)
+# and speech-to-text (backend/speech_to_text.py). The [all] extra
+# pulls in the OpenAI and Google GenAI client bindings, both of
+# which this project uses.
+generative-ai-hub-sdk[all]>=4.0.0
+
+# --- Local text-to-speech (backend/text_to_speech.py) ---------
+# Piper runs on CPU with no network call. onnxruntime is its
+# inference engine; pin it if your platform needs a specific build.
+piper-tts>=1.2.0
+onnxruntime>=1.17.0
 
 # --- PDF manual text extraction (backend/scripts/ingest_manuals.py)
-pypdf==5.1.0
+# pdfplumber rather than pypdf: maintenance manuals are multi-column
+# with tables, and pdfplumber keeps words in reading order.
+pdfplumber==0.11.4
 
 # --- PDF report generation (backend/pdf_service.py) -------------
 reportlab==4.2.5

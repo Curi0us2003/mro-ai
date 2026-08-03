@@ -3,39 +3,56 @@
    --------------------------------------------------------------
    Talks to the Flask API defined in backend/app.py. All requests
    are same-origin relative paths, since Flask serves this file
-   itself (see FRONTEND_FOLDER / static_folder in app.py).
+   itself (see FRONTEND_FOLDER / static_folder in app.py), and the
+   session cookie rides along automatically.
 
-   Two views:
-     - Technician: start a session, speak or type findings,
-       watch the structured record fill in, download the report.
-     - Supervisor: browse all maintenance records, drill into one,
-       read its transcript, download its report.
+   Flow:
+     1. On load, ask /api/auth/me who we are. Signed in -> straight
+        to the right view. Not signed in -> login screen.
+     2. Role decides the view. A technician runs inspection
+        sessions; a supervisor reviews everyone's records. Nobody
+        sees the other's screen - the server enforces this too,
+        this is just the UI half.
+     3. Any 401 mid-session drops back to login rather than failing
+        silently, which is what happens when a session expires.
+
+   There is no registration screen. Accounts are created by an
+   administrator with backend/scripts/manage_users.py.
 ============================================================== */
 
 (() => {
   "use strict";
 
   const API = {
+    login: () => "/api/auth/login",
+    logout: () => "/api/auth/logout",
+    me: () => "/api/auth/me",
     createSession: () => "/api/sessions",
     session: (id) => `/api/sessions/${id}`,
     sendVoice: (id) => `/api/sessions/${id}/voice`,
     sendMessage: (id) => `/api/sessions/${id}/message`,
+    speak: (id) => `/api/sessions/${id}/speak`,
     records: (params) => `/api/records${params ? `?${params}` : ""}`,
     record: (id) => `/api/records/${id}`,
     report: (id) => `/api/records/${id}/report`,
   };
+
+  const ROLE_TECHNICIAN = "TECHNICIAN";
+  const ROLE_SUPERVISOR = "SUPERVISOR";
 
   // ------------------------------------------------------------
   // State
   // ------------------------------------------------------------
 
   const state = {
+    user: null,
     sessionId: null,
-    technician: null,
     recordId: null,
     isRecording: false,
+    isBusy: false,
     mediaRecorder: null,
     audioChunks: [],
+    selectedRecordId: null,
   };
 
   // ------------------------------------------------------------
@@ -43,32 +60,43 @@
   // ------------------------------------------------------------
 
   const els = {
-    tabTechnician: document.getElementById("tab-technician"),
-    tabSupervisor: document.getElementById("tab-supervisor"),
+    // shell
+    shellUser: document.getElementById("shell-user"),
+    shellUserName: document.getElementById("shell-user-name"),
+    shellUserRole: document.getElementById("shell-user-role"),
+    btnSignOut: document.getElementById("btn-sign-out"),
+
+    // views
+    viewLogin: document.getElementById("view-login"),
     viewTechnician: document.getElementById("view-technician"),
     viewSupervisor: document.getElementById("view-supervisor"),
 
+    // login
+    formLogin: document.getElementById("form-login"),
+    inputUsername: document.getElementById("input-username"),
+    inputPassword: document.getElementById("input-password"),
+    btnLogin: document.getElementById("btn-login"),
+    loginError: document.getElementById("login-error"),
+
+    // technician
     panelStart: document.getElementById("panel-start"),
-    inputTechnicianName: document.getElementById("input-technician-name"),
     btnStartSession: document.getElementById("btn-start-session"),
     startSessionError: document.getElementById("start-session-error"),
-
     workspace: document.getElementById("workspace"),
     sessionTechnicianName: document.getElementById("session-technician-name"),
     btnEndSession: document.getElementById("btn-end-session"),
-
     micBtn: document.getElementById("btn-mic"),
     voiceStatus: document.getElementById("voice-status"),
-    replyAudio: document.getElementById("reply-audio"),
-
     formTextFallback: document.getElementById("form-text-fallback"),
     inputTextMessage: document.getElementById("input-text-message"),
-
     transcript: document.getElementById("transcript"),
+    replyAudio: document.getElementById("reply-audio"),
+    toggleSpeak: document.getElementById("toggle-speak"),
     recordStatusPill: document.getElementById("record-status-pill"),
     recordFields: document.getElementById("record-fields"),
     btnDownloadReport: document.getElementById("btn-download-report"),
 
+    // supervisor
     inputFilterAircraft: document.getElementById("input-filter-aircraft"),
     btnRefreshRecords: document.getElementById("btn-refresh-records"),
     recordsTableBody: document.getElementById("records-table-body"),
@@ -76,333 +104,428 @@
   };
 
   // ------------------------------------------------------------
+  // HTTP helpers
+  // ------------------------------------------------------------
+
+  class ApiError extends Error {
+    constructor(message, status) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  async function api(url, options = {}) {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      ...options,
+    });
+
+    if (response.status === 401 && !url.endsWith("/api/auth/me")) {
+      showLogin("Your session expired. Sign in again.");
+      throw new ApiError("Not signed in", 401);
+    }
+
+    let payload = null;
+    const type = response.headers.get("content-type") || "";
+    if (type.includes("application/json")) {
+      payload = await response.json().catch(() => null);
+    }
+
+    if (!response.ok) {
+      const message = (payload && payload.error) || `Request failed (${response.status})`;
+      throw new ApiError(message, response.status);
+    }
+
+    return payload;
+  }
+
+  function postJson(url, body) {
+    return api(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+  }
+
+  // ------------------------------------------------------------
   // View switching
   // ------------------------------------------------------------
 
-  function showView(name) {
-    const isTechnician = name === "technician";
-    els.viewTechnician.classList.toggle("is-active", isTechnician);
-    els.viewSupervisor.classList.toggle("is-active", !isTechnician);
-    els.tabTechnician.classList.toggle("is-active", isTechnician);
-    els.tabSupervisor.classList.toggle("is-active", !isTechnician);
-    els.tabTechnician.setAttribute("aria-selected", String(isTechnician));
-    els.tabSupervisor.setAttribute("aria-selected", String(!isTechnician));
+  function showView(view) {
+    [els.viewLogin, els.viewTechnician, els.viewSupervisor].forEach((section) => {
+      section.classList.toggle("is-active", section === view);
+    });
+  }
 
-    if (!isTechnician) {
+  function showLogin(message) {
+    state.user = null;
+    state.sessionId = null;
+    state.recordId = null;
+    els.shellUser.hidden = true;
+    els.loginError.textContent = message || "";
+    showView(els.viewLogin);
+    els.inputPassword.value = "";
+    els.inputUsername.focus();
+  }
+
+  function showForRole(user) {
+    state.user = user;
+
+    els.shellUserName.textContent = user.full_name;
+    els.shellUserRole.textContent =
+      user.role === ROLE_SUPERVISOR ? "Supervisor" : "Technician";
+    els.shellUser.hidden = false;
+
+    if (user.role === ROLE_SUPERVISOR) {
+      showView(els.viewSupervisor);
       loadRecords();
+    } else {
+      showView(els.viewTechnician);
+      els.panelStart.hidden = false;
+      els.workspace.hidden = true;
     }
   }
 
-  els.tabTechnician.addEventListener("click", () => showView("technician"));
-  els.tabSupervisor.addEventListener("click", () => showView("supervisor"));
-
   // ------------------------------------------------------------
-  // Helpers
+  // Authentication
   // ------------------------------------------------------------
 
-  function severityClass(prefix, severity) {
-    const key = (severity || "").trim().toLowerCase();
-    if (["minor", "major", "critical", "aog"].includes(key)) {
-      return `${prefix}--${key}`;
-    }
-    return `${prefix}--default`;
-  }
-
-  function formatDate(value) {
-    if (!value) return "—";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return date.toLocaleString();
-  }
-
-  async function requestJSON(url, options) {
-    const response = await fetch(url, options);
-    let body = null;
+  async function restoreSession() {
     try {
-      body = await response.json();
+      const data = await api(API.me());
+      if (data && data.user) {
+        showForRole(data.user);
+        return;
+      }
     } catch (_err) {
-      body = null;
+      /* not signed in - fall through */
     }
-    if (!response.ok) {
-      const message = (body && body.error) || `Request failed (${response.status})`;
-      throw new Error(message);
-    }
-    return body;
+    showLogin();
   }
 
-  // ------------------------------------------------------------
-  // Technician: session lifecycle
-  // ------------------------------------------------------------
+  async function handleLogin(event) {
+    event.preventDefault();
 
-  els.btnStartSession.addEventListener("click", async () => {
-    const technician = els.inputTechnicianName.value.trim();
-    els.startSessionError.textContent = "";
+    const username = els.inputUsername.value.trim();
+    const password = els.inputPassword.value;
 
-    if (!technician) {
-      els.startSessionError.textContent = "Please enter your name to start.";
+    if (!username || !password) {
+      els.loginError.textContent = "Enter your username and password.";
       return;
     }
 
-    els.btnStartSession.disabled = true;
-    try {
-      const data = await requestJSON(API.createSession(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ technician }),
-      });
+    els.btnLogin.disabled = true;
+    els.btnLogin.textContent = "Signing in…";
+    els.loginError.textContent = "";
 
+    try {
+      const data = await postJson(API.login(), { username, password });
+      els.inputPassword.value = "";
+      showForRole(data.user);
+    } catch (err) {
+      els.loginError.textContent = err.message;
+      els.inputPassword.value = "";
+      els.inputPassword.focus();
+    } finally {
+      els.btnLogin.disabled = false;
+      els.btnLogin.textContent = "Sign in";
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      if (state.sessionId) {
+        await api(API.session(state.sessionId), { method: "DELETE" }).catch(() => {});
+      }
+      await postJson(API.logout());
+    } finally {
+      clearTranscript();
+      showLogin();
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Technician: sessions
+  // ------------------------------------------------------------
+
+  async function startSession() {
+    els.btnStartSession.disabled = true;
+    els.startSessionError.textContent = "";
+
+    try {
+      const data = await postJson(API.createSession());
       state.sessionId = data.session_id;
-      state.technician = data.technician;
       state.recordId = null;
 
-      els.sessionTechnicianName.textContent = state.technician;
+      els.sessionTechnicianName.textContent = data.technician;
       els.panelStart.hidden = true;
       els.workspace.hidden = false;
-      resetTranscript();
+
+      clearTranscript();
       resetRecordCard();
+      setVoiceStatus("Tap to speak a finding");
     } catch (err) {
       els.startSessionError.textContent = err.message;
     } finally {
       els.btnStartSession.disabled = false;
     }
-  });
+  }
 
-  els.btnEndSession.addEventListener("click", async () => {
+  async function endSession() {
     if (!state.sessionId) return;
+
     try {
-      await fetch(API.session(state.sessionId), { method: "DELETE" });
+      await api(API.session(state.sessionId), { method: "DELETE" });
     } catch (_err) {
-      /* best-effort */
+      /* ending a session that's already gone is fine */
     }
+
     state.sessionId = null;
-    state.technician = null;
     state.recordId = null;
     els.workspace.hidden = true;
     els.panelStart.hidden = false;
-    els.inputTechnicianName.value = "";
-  });
-
-  // ------------------------------------------------------------
-  // Technician: transcript rendering
-  // ------------------------------------------------------------
-
-  function resetTranscript() {
-    els.transcript.innerHTML = '<p class="transcript__empty">Your conversation with the copilot will appear here.</p>';
+    stopPlayback();
   }
+
+  // ------------------------------------------------------------
+  // Technician: conversation
+  // ------------------------------------------------------------
 
   function appendTurn(role, text) {
     const empty = els.transcript.querySelector(".transcript__empty");
     if (empty) empty.remove();
 
-    const bubble = document.createElement("div");
-    bubble.className = `transcript-turn transcript-turn--${role}`;
+    const turn = document.createElement("div");
+    turn.className = `transcript-turn transcript-turn--${role}`;
 
     const label = document.createElement("span");
     label.className = "transcript-turn__label";
-    label.textContent = role === "technician" ? "You" : "AI Copilot";
+    label.textContent = role === "technician" ? "You" : "Copilot";
 
     const body = document.createElement("span");
     body.textContent = text;
 
-    bubble.appendChild(label);
-    bubble.appendChild(body);
-    els.transcript.appendChild(bubble);
+    turn.append(label, body);
+    els.transcript.appendChild(turn);
     els.transcript.scrollTop = els.transcript.scrollHeight;
   }
 
-  // ------------------------------------------------------------
-  // Technician: record card rendering
-  // ------------------------------------------------------------
+  function clearTranscript() {
+    els.transcript.innerHTML =
+      '<p class="transcript__empty">Your conversation with the copilot will appear here.</p>';
+  }
 
-  function resetRecordCard() {
-    els.recordStatusPill.textContent = "Not started";
-    els.recordStatusPill.className = "status-pill";
-    els.btnDownloadReport.disabled = true;
-    els.recordFields.querySelectorAll("dd").forEach((dd) => {
-      dd.textContent = "—";
-      dd.className = "";
+  function playReply(url) {
+    if (!url || !els.toggleSpeak.checked) return;
+    els.replyAudio.src = url;
+    els.replyAudio.play().catch(() => {
+      // Autoplay can be blocked until the user interacts with the
+      // page. Tapping the mic counts, so this rarely fires twice.
+      setVoiceStatus("Tap the mic once to enable audio replies");
     });
   }
 
-  function renderRecord(record, isComplete) {
-    if (!record) {
-      resetRecordCard();
-      return;
-    }
-
-    els.recordStatusPill.textContent = isComplete ? "Complete" : "In progress";
-    els.recordStatusPill.className = `status-pill ${isComplete ? "status-pill--complete" : "status-pill--open"}`;
-
-    els.recordFields.querySelectorAll("dd").forEach((dd) => {
-      const field = dd.dataset.field;
-      const value = record[field];
-      dd.textContent = value || "Not recorded yet";
-      dd.className = value ? "" : "is-empty";
-      if (field === "SEVERITY" && value) {
-        dd.className = severityClass("severity", value);
-      }
-    });
-
-    els.btnDownloadReport.disabled = !isComplete;
+  function stopPlayback() {
+    els.replyAudio.pause();
+    els.replyAudio.removeAttribute("src");
   }
 
-  async function refreshSessionStatus() {
-    if (!state.sessionId) return;
-    try {
-      const data = await requestJSON(API.session(state.sessionId));
-      state.recordId = data.record_id;
-      renderRecord(data.record, data.record_complete);
-    } catch (err) {
-      console.error("Failed to refresh session status:", err);
-    }
-  }
-
-  els.btnDownloadReport.addEventListener("click", () => {
-    if (!state.recordId) return;
-    window.open(API.report(state.recordId), "_blank");
-  });
-
-  // ------------------------------------------------------------
-  // Technician: text fallback
-  // ------------------------------------------------------------
-
-  els.formTextFallback.addEventListener("submit", async (event) => {
+  async function sendText(event) {
     event.preventDefault();
+
     const text = els.inputTextMessage.value.trim();
-    if (!text || !state.sessionId) return;
+    if (!text || !state.sessionId || state.isBusy) return;
 
     els.inputTextMessage.value = "";
     appendTurn("technician", text);
-    setVoiceStatus("Thinking…");
+    setBusy(true, "Thinking…");
 
     try {
-      const data = await requestJSON(API.sendMessage(state.sessionId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
+      const data = await postJson(API.sendMessage(state.sessionId), { text });
       appendTurn("assistant", data.reply);
-      setVoiceStatus("Tap to speak a finding");
-      await refreshSessionStatus();
+      applyRecordState(data);
+
+      // The text path returns no audio, so ask for it separately
+      // when the technician wants replies read aloud.
+      if (els.toggleSpeak.checked) {
+        try {
+          const audio = await postJson(API.speak(state.sessionId), { text: data.reply });
+          playReply(audio.reply_audio_url);
+        } catch (_err) {
+          /* silent: a missing voice model shouldn't break the turn */
+        }
+      }
     } catch (err) {
-      appendTurn("assistant", `Something went wrong: ${err.message}`);
-      setVoiceStatus("Tap to speak a finding");
+      appendTurn("assistant", `Couldn't send that: ${err.message}`);
+    } finally {
+      setBusy(false, "Tap to speak a finding");
     }
-  });
-
-  // ------------------------------------------------------------
-  // Technician: voice recording
-  // ------------------------------------------------------------
-
-  function setVoiceStatus(text) {
-    els.voiceStatus.textContent = text;
   }
 
-  function setMicState(mode) {
-    els.micBtn.classList.remove("is-recording", "is-busy");
-    if (mode === "recording") els.micBtn.classList.add("is-recording");
-    if (mode === "busy") els.micBtn.classList.add("is-busy");
-    els.micBtn.disabled = mode === "busy";
-  }
-
-  els.micBtn.addEventListener("click", async () => {
+  async function sendVoice(blob) {
     if (!state.sessionId) return;
 
+    const form = new FormData();
+    form.append("audio", blob, "recording.webm");
+
+    setBusy(true, "Transcribing…");
+
+    try {
+      const data = await api(API.sendVoice(state.sessionId), {
+        method: "POST",
+        body: form,
+      });
+
+      appendTurn("technician", data.transcript);
+      appendTurn("assistant", data.reply);
+      applyRecordState(data);
+      playReply(data.reply_audio_url);
+    } catch (err) {
+      appendTurn("assistant", `Couldn't process that recording: ${err.message}`);
+    } finally {
+      setBusy(false, "Tap to speak a finding");
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Technician: microphone
+  // ------------------------------------------------------------
+
+  async function toggleRecording() {
+    if (state.isBusy) return;
+
     if (state.isRecording) {
-      stopRecording();
+      state.mediaRecorder.stop();
+      return;
+    }
+
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      setVoiceStatus("This browser can't record audio — type instead");
       return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      const recorder = new MediaRecorder(stream);
 
       state.mediaRecorder = recorder;
       state.audioChunks = [];
 
       recorder.addEventListener("dataavailable", (event) => {
-        if (event.data && event.data.size > 0) state.audioChunks.push(event.data);
+        if (event.data.size > 0) state.audioChunks.push(event.data);
       });
 
       recorder.addEventListener("stop", () => {
         stream.getTracks().forEach((track) => track.stop());
-        handleRecordingComplete();
+        state.isRecording = false;
+        els.micBtn.classList.remove("is-recording");
+        els.micBtn.setAttribute("aria-label", "Start recording");
+
+        const blob = new Blob(state.audioChunks, { type: "audio/webm" });
+        if (blob.size > 0) sendVoice(blob);
       });
 
       recorder.start();
       state.isRecording = true;
-      setMicState("recording");
-      setVoiceStatus("Listening… tap again to stop");
-    } catch (err) {
-      setVoiceStatus("Microphone access was denied or unavailable.");
-      console.error(err);
+      els.micBtn.classList.add("is-recording");
+      els.micBtn.setAttribute("aria-label", "Stop recording");
+      setVoiceStatus("Listening — tap again when you're done");
+    } catch (_err) {
+      setVoiceStatus("Microphone access was blocked — type instead");
     }
-  });
-
-  function stopRecording() {
-    if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
-      state.mediaRecorder.stop();
-    }
-    state.isRecording = false;
   }
 
-  async function handleRecordingComplete() {
-    setMicState("busy");
-    setVoiceStatus("Transcribing and thinking…");
+  function setVoiceStatus(text) {
+    els.voiceStatus.textContent = text;
+  }
 
-    const blob = new Blob(state.audioChunks, { type: state.audioChunks[0]?.type || "audio/webm" });
-    const formData = new FormData();
-    formData.append("audio", blob, "recording.webm");
-
-    try {
-      const data = await requestJSON(API.sendVoice(state.sessionId), {
-        method: "POST",
-        body: formData,
-      });
-
-      appendTurn("technician", data.transcript);
-      appendTurn("assistant", data.reply);
-
-      if (data.reply_audio_url) {
-        els.replyAudio.src = data.reply_audio_url;
-        els.replyAudio.hidden = false;
-        els.replyAudio.play().catch(() => {
-          /* autoplay may be blocked - user can press play manually */
-        });
-      }
-
-      await refreshSessionStatus();
-      setVoiceStatus("Tap to speak a finding");
-    } catch (err) {
-      appendTurn("assistant", `Something went wrong: ${err.message}`);
-      setVoiceStatus("Tap to speak a finding");
-    } finally {
-      setMicState("idle");
-    }
+  function setBusy(busy, status) {
+    state.isBusy = busy;
+    els.micBtn.classList.toggle("is-busy", busy);
+    els.micBtn.disabled = busy;
+    if (status) setVoiceStatus(status);
   }
 
   // ------------------------------------------------------------
-  // Supervisor: records table
+  // Technician: record card
+  // ------------------------------------------------------------
+
+  function resetRecordCard() {
+    els.recordFields.querySelectorAll("dd").forEach((cell) => {
+      cell.textContent = "—";
+      cell.className = "is-empty";
+    });
+    els.recordStatusPill.textContent = "Not started";
+    els.recordStatusPill.className = "status-pill";
+    els.btnDownloadReport.disabled = true;
+  }
+
+  async function applyRecordState(turnData) {
+    state.recordId = turnData.record_id || state.recordId;
+
+    if (!state.recordId) {
+      resetRecordCard();
+      return;
+    }
+
+    els.recordStatusPill.textContent = turnData.record_complete ? "Complete" : "In progress";
+    els.recordStatusPill.className =
+      "status-pill " + (turnData.record_complete ? "status-pill--complete" : "status-pill--open");
+    els.btnDownloadReport.disabled = false;
+
+    try {
+      const data = await api(API.session(state.sessionId));
+      if (data.record) fillRecordFields(data.record);
+    } catch (_err) {
+      /* the card is a convenience, not the source of truth */
+    }
+  }
+
+  function fillRecordFields(record) {
+    els.recordFields.querySelectorAll("dd").forEach((cell) => {
+      const value = record[cell.dataset.field];
+      if (value) {
+        cell.textContent = value;
+        cell.className = "";
+        if (cell.dataset.field === "SEVERITY") {
+          cell.className = `severity--${String(value).toLowerCase()}`;
+        }
+      } else {
+        cell.textContent = "—";
+        cell.className = "is-empty";
+      }
+    });
+  }
+
+  function downloadReport() {
+    if (!state.recordId) return;
+    window.open(API.report(state.recordId), "_blank");
+  }
+
+  // ------------------------------------------------------------
+  // Supervisor: records
   // ------------------------------------------------------------
 
   async function loadRecords() {
-    const aircraftReg = els.inputFilterAircraft.value.trim();
-    const params = aircraftReg ? `aircraft_reg=${encodeURIComponent(aircraftReg)}` : "";
+    const filter = els.inputFilterAircraft.value.trim();
+    const params = filter ? `aircraft_reg=${encodeURIComponent(filter)}` : "";
 
-    els.recordsTableBody.innerHTML = '<tr><td colspan="6" class="records-table__empty">Loading records…</td></tr>';
+    els.recordsTableBody.innerHTML =
+      '<tr><td colspan="6" class="records-table__empty">Loading records…</td></tr>';
 
     try {
-      const data = await requestJSON(API.records(params));
-      renderRecordsTable(data.records || []);
+      const data = await api(API.records(params));
+      renderRecords(data.records);
     } catch (err) {
-      els.recordsTableBody.innerHTML = `<tr><td colspan="6" class="records-table__empty">Failed to load records: ${err.message}</td></tr>`;
+      els.recordsTableBody.innerHTML =
+        `<tr><td colspan="6" class="records-table__empty">${escapeHtml(err.message)}</td></tr>`;
     }
   }
 
-  function renderRecordsTable(records) {
+  function renderRecords(records) {
     if (!records.length) {
-      els.recordsTableBody.innerHTML = '<tr><td colspan="6" class="records-table__empty">No maintenance records yet.</td></tr>';
+      els.recordsTableBody.innerHTML =
+        '<tr><td colspan="6" class="records-table__empty">No findings logged yet.</td></tr>';
       return;
     }
 
@@ -412,96 +535,148 @@
       const row = document.createElement("tr");
       row.dataset.recordId = record.RECORD_ID;
 
+      const severity = (record.SEVERITY || "").toLowerCase();
+      const badgeClass = ["minor", "major", "critical", "aog"].includes(severity)
+        ? `badge--${severity}`
+        : "badge--default";
+
       row.innerHTML = `
-        <td>${escapeHTML(record.AIRCRAFT_REG || "—")}</td>
-        <td>${escapeHTML(record.COMPONENT || "—")}</td>
-        <td><span class="badge ${severityClass("badge", record.SEVERITY)}">${escapeHTML(record.SEVERITY || "—")}</span></td>
-        <td>${escapeHTML(record.STATUS || "—")}</td>
-        <td>${escapeHTML(record.TECHNICIAN || "—")}</td>
+        <td>${escapeHtml(record.AIRCRAFT_REG || "—")}</td>
+        <td>${escapeHtml(record.COMPONENT || "—")}</td>
+        <td><span class="badge ${badgeClass}">${escapeHtml(record.SEVERITY || "—")}</span></td>
+        <td>${escapeHtml(record.STATUS || "—")}</td>
+        <td>${escapeHtml(record.TECHNICIAN || "—")}</td>
         <td>${formatDate(record.CREATED_AT)}</td>
       `;
 
-      row.addEventListener("click", () => selectRecord(record.RECORD_ID, row));
+      row.addEventListener("click", () => selectRecord(record.RECORD_ID));
       els.recordsTableBody.appendChild(row);
     });
   }
 
-  function escapeHTML(value) {
-    const div = document.createElement("div");
-    div.textContent = value;
-    return div.innerHTML;
-  }
+  async function selectRecord(recordId) {
+    state.selectedRecordId = recordId;
 
-  async function selectRecord(recordId, rowEl) {
-    els.recordsTableBody.querySelectorAll("tr").forEach((tr) => tr.classList.remove("is-selected"));
-    if (rowEl) rowEl.classList.add("is-selected");
+    els.recordsTableBody.querySelectorAll("tr").forEach((row) => {
+      row.classList.toggle("is-selected", row.dataset.recordId === recordId);
+    });
 
-    els.recordDetail.innerHTML = '<p class="record-detail__placeholder">Loading…</p>';
+    els.recordDetail.innerHTML =
+      '<p class="record-detail__placeholder">Loading…</p>';
 
     try {
-      const data = await requestJSON(API.record(recordId));
+      const data = await api(API.record(recordId));
       renderRecordDetail(data.record, data.conversation || []);
     } catch (err) {
-      els.recordDetail.innerHTML = `<p class="record-detail__placeholder">Failed to load record: ${err.message}</p>`;
+      els.recordDetail.innerHTML =
+        `<p class="record-detail__placeholder">${escapeHtml(err.message)}</p>`;
     }
   }
 
   function renderRecordDetail(record, conversation) {
-    const severityBadge = `<span class="badge ${severityClass("badge", record.SEVERITY)}">${escapeHTML(record.SEVERITY || "—")}</span>`;
+    const severity = (record.SEVERITY || "").toLowerCase();
 
-    let html = `
+    const rows = [
+      ["Aircraft", record.AIRCRAFT_REG],
+      ["Component", record.COMPONENT],
+      ["Location", record.LOCATION],
+      ["Severity", record.SEVERITY],
+      ["Status", record.STATUS],
+      ["Technician", record.TECHNICIAN],
+      ["Inspected", formatDate(record.INSPECTION_TS)],
+    ];
+
+    const turns = conversation
+      .map((turn) => {
+        const who = turn.ROLE === "technician" ? "Technician" : "Copilot";
+        return `<div class="transcript-turn transcript-turn--${escapeHtml(turn.ROLE)}">
+                  <span class="transcript-turn__label">${who}</span>
+                  <span>${escapeHtml(turn.MESSAGE || "")}</span>
+                </div>`;
+      })
+      .join("");
+
+    els.recordDetail.innerHTML = `
       <div class="record-detail__header">
         <div>
-          <p class="record-detail__title">${escapeHTML(record.AIRCRAFT_REG || "Unknown aircraft")} — ${escapeHTML(record.COMPONENT || "Unknown component")}</p>
-          <p class="record-detail__subtitle">Reported by ${escapeHTML(record.TECHNICIAN || "—")} · ${formatDate(record.CREATED_AT)}</p>
+          <h2 class="record-detail__title">${escapeHtml(record.AIRCRAFT_REG || "Unassigned")}</h2>
+          <p class="record-detail__subtitle">${escapeHtml(record.COMPONENT || "No component recorded")}</p>
         </div>
-        ${severityBadge}
+        <span class="badge badge--${severity || "default"}">${escapeHtml(record.SEVERITY || "—")}</span>
       </div>
+
+      <dl class="record-fields">
+        ${rows
+          .map(
+            ([label, value]) => `
+          <div class="record-fields__row">
+            <dt>${label}</dt>
+            <dd class="${value ? "" : "is-empty"}">${escapeHtml(value || "—")}</dd>
+          </div>`
+          )
+          .join("")}
+      </dl>
 
       <p class="record-detail__section-title">Finding</p>
-      <p>${escapeHTML(record.FINDING || "Not recorded")}</p>
-
-      <p class="record-detail__section-title">Location</p>
-      <p>${escapeHTML(record.LOCATION || "Not recorded")}</p>
+      <p>${escapeHtml(record.FINDING || "Not recorded")}</p>
 
       <p class="record-detail__section-title">Recommended action</p>
-      <p>${escapeHTML(record.RECOMMENDED_ACTION || "Not recorded")}</p>
+      <p>${escapeHtml(record.RECOMMENDED_ACTION || "Not recorded")}</p>
 
-      <button class="btn btn--primary btn--full" id="btn-detail-download-report">Download PDF report</button>
+      ${turns ? `<p class="record-detail__section-title">Transcript</p>
+                 <div class="record-detail__conversation">${turns}</div>` : ""}
 
-      <p class="record-detail__section-title">Conversation transcript</p>
-      <div class="record-detail__conversation">
-        ${
-          conversation.length
-            ? conversation
-                .map(
-                  (turn) => `
-              <div class="transcript-turn transcript-turn--${turn.ROLE === "technician" ? "technician" : "assistant"}">
-                <span class="transcript-turn__label">${escapeHTML(turn.ROLE)}</span>
-                <span>${escapeHTML(turn.MESSAGE)}</span>
-              </div>`
-                )
-                .join("")
-            : '<p class="transcript__empty">No conversation recorded.</p>'
-        }
-      </div>
+      <button class="btn btn--primary btn--full" id="btn-detail-report">Download PDF report</button>
     `;
 
-    els.recordDetail.innerHTML = html;
+    document
+      .getElementById("btn-detail-report")
+      .addEventListener("click", () => window.open(API.report(record.RECORD_ID), "_blank"));
+  }
 
-    document.getElementById("btn-detail-download-report").addEventListener("click", () => {
-      window.open(API.report(record.RECORD_ID), "_blank");
+  // ------------------------------------------------------------
+  // Utilities
+  // ------------------------------------------------------------
+
+  function escapeHtml(value) {
+    const div = document.createElement("div");
+    div.textContent = value == null ? "" : String(value);
+    return div.innerHTML;
+  }
+
+  function formatDate(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return escapeHtml(value);
+    return date.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   }
+
+  // ------------------------------------------------------------
+  // Wiring
+  // ------------------------------------------------------------
+
+  els.formLogin.addEventListener("submit", handleLogin);
+  els.btnSignOut.addEventListener("click", handleSignOut);
+
+  els.btnStartSession.addEventListener("click", startSession);
+  els.btnEndSession.addEventListener("click", endSession);
+  els.micBtn.addEventListener("click", toggleRecording);
+  els.formTextFallback.addEventListener("submit", sendText);
+  els.btnDownloadReport.addEventListener("click", downloadReport);
+  els.toggleSpeak.addEventListener("change", () => {
+    if (!els.toggleSpeak.checked) stopPlayback();
+  });
 
   els.btnRefreshRecords.addEventListener("click", loadRecords);
   els.inputFilterAircraft.addEventListener("keydown", (event) => {
     if (event.key === "Enter") loadRecords();
   });
 
-  // ------------------------------------------------------------
-  // Init
-  // ------------------------------------------------------------
-
-  showView("technician");
+  restoreSession();
 })();
