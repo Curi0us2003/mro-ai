@@ -1,1 +1,12 @@
 .env
+__pycache__/
+*.pyc
+voices/
+uploads/*
+!uploads/.gitkeep
+audio_output/*
+!audio_output/.gitkeep
+generated_reports/*
+!generated_reports/.gitkeep
+logs/*
+!logs/.gitkeep
