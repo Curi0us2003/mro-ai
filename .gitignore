@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 voices/
+certs/
 uploads/*
 !uploads/.gitkeep
 audio_output/*

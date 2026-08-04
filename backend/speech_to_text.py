@@ -16,6 +16,11 @@ is the only speech-capable model family in the hub - there is no
 Whisper deployment available there - so transcription is done by
 a multimodal model taking the audio as inline data.
 
+The installed generative-ai-hub-sdk build exposes Gemini only
+through its `google_vertexai` native client (a drop-in for
+`vertexai.generative_models.GenerativeModel`) - it has no
+`google_genai` client at all, so that's the API used below.
+
 Because we lose Whisper's `prompt` parameter (which biased the
 decoder toward supplied vocabulary), the domain priming happens
 in the system instruction instead: we tell the model it is
@@ -187,38 +192,45 @@ def save_uploaded_audio(audio_bytes: bytes, original_file_name: str) -> Path:
 # Provider call
 # ==========================================================
 
-def _get_client():
-    """Google GenAI client wired through the AI Core proxy."""
-    from gen_ai_hub.proxy.core.proxy_clients import get_proxy_client
-    from gen_ai_hub.proxy.native.google_genai.clients import Client
+def _build_model(system_instruction: str):
+    """
+    Gemini model wired through the AI Core proxy.
 
-    return Client(proxy_client=get_proxy_client("gen-ai-hub"))
+    Unlike the openai-compatible proxy used for chat/embeddings,
+    google_vertexai's GenerativeModel needs a real `model_name` to build
+    its request URI even when `deployment_id` is also given to pin the
+    exact AI Core deployment - passing deployment_id alone leaves the
+    underlying vertexai SDK with an empty model name and every call
+    fails with an "Invalid request" URI-templating error.
+    """
+    from gen_ai_hub.proxy.native.google_vertexai.clients import GenerativeModel
+
+    kwargs: dict = {"model_name": AICORE_STT_MODEL, "system_instruction": system_instruction}
+    if AICORE_STT_DEPLOYMENT_ID:
+        kwargs["deployment_id"] = AICORE_STT_DEPLOYMENT_ID
+
+    return GenerativeModel(**kwargs)
 
 
 def _transcribe_bytes(audio_bytes: bytes, mime_type: str, language: Optional[str]) -> str:
     """Send audio to the deployed Gemini model and return the transcript."""
-    from google.genai import types
+    from vertexai.generative_models import GenerationConfig, Part
 
     instruction = TRANSCRIPTION_INSTRUCTION
     if language:
         instruction += f"\nThe technician is speaking {language}. Transcribe in that language."
 
-    client = _get_client()
-    model = AICORE_STT_DEPLOYMENT_ID or AICORE_STT_MODEL
-
-    logger.info("Transcribing %d bytes (%s) via %s", len(audio_bytes), mime_type, model)
+    model_name = AICORE_STT_DEPLOYMENT_ID or AICORE_STT_MODEL
+    logger.info("Transcribing %d bytes (%s) via %s", len(audio_bytes), mime_type, model_name)
 
     try:
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+        model = _build_model(instruction)
+        response = model.generate_content(
+            [
+                Part.from_data(data=audio_bytes, mime_type=mime_type),
                 "Transcribe this recording.",
             ],
-            config=types.GenerateContentConfig(
-                system_instruction=instruction,
-                temperature=0.0,
-            ),
+            generation_config=GenerationConfig(temperature=0.0),
         )
     except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
         raise TranscriptionError(f"Speech-to-text failed: {exc}") from exc

@@ -69,6 +69,8 @@ from backend.config import (
     SECRET_KEY,
     SESSION_LIFETIME_HOURS,
     SESSION_COOKIE_SECURE,
+    HTTPS_ADHOC,
+    CERTS_FOLDER,
     ROLE_SUPERVISOR,
     ROLE_TECHNICIAN,
     FRONTEND_FOLDER,
@@ -700,7 +702,40 @@ def register_error_handlers(app: Flask) -> None:
 # Entry Point
 # ==========================================================
 
+def _dev_ssl_context() -> Optional[tuple[str, str]]:
+    """
+    Return (cert_path, key_path) for a self-signed dev certificate,
+    generating it once into CERTS_FOLDER if it isn't there yet.
+
+    Deliberately not Werkzeug's ssl_context="adhoc": that regenerates a
+    brand-new certificate every time the process starts, and DEBUG=true's
+    reloader restarts the process on its own - each restart would
+    invalidate the "proceed anyway" exception the browser just accepted,
+    which looks exactly like the page never loading.
+    """
+    cert_path = CERTS_FOLDER / "dev.crt"
+    key_path = CERTS_FOLDER / "dev.key"
+
+    if not cert_path.exists() or not key_path.exists():
+        from werkzeug.serving import make_ssl_devcert
+
+        logger.info("Generating a self-signed dev certificate in %s", CERTS_FOLDER)
+        make_ssl_devcert(str(CERTS_FOLDER / "dev"))
+
+    return (str(cert_path), str(key_path))
+
+
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(host=HOST, port=PORT, debug=DEBUG)
+    # A self-signed cert is required for the microphone (getUserMedia/
+    # MediaRecorder) to work from any device other than localhost - see
+    # HTTPS_ADHOC in backend/config.py.
+    ssl_context = _dev_ssl_context() if HTTPS_ADHOC else None
+    if ssl_context:
+        logger.info(
+            "Serving over HTTPS with a self-signed certificate - browsers "
+            "will show a one-time certificate warning to click through "
+            "(only once, since the certificate is now reused across restarts)."
+        )
+    app.run(host=HOST, port=PORT, debug=DEBUG, ssl_context=ssl_context)

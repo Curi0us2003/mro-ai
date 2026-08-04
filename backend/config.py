@@ -85,6 +85,10 @@ AUDIO_OUTPUT_FOLDER = PROJECT_ROOT / "audio_output"
 # Piper voice models (.onnx + .onnx.json) live here.
 VOICES_FOLDER = PROJECT_ROOT / "voices"
 
+# Self-signed dev HTTPS certificate (see HTTPS_ADHOC below) lives here,
+# generated once and reused - not regenerated on every server restart.
+CERTS_FOLDER = PROJECT_ROOT / "certs"
+
 # Create folders automatically
 
 for folder in (
@@ -94,6 +98,7 @@ for folder in (
     LOG_FOLDER,
     AUDIO_OUTPUT_FOLDER,
     VOICES_FOLDER,
+    CERTS_FOLDER,
 ):
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -127,6 +132,24 @@ SESSION_LIFETIME_HOURS = int(os.getenv("SESSION_LIFETIME_HOURS", "12"))
 SESSION_COOKIE_SECURE = (
     os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
 )
+
+# Browsers only expose the microphone (getUserMedia/MediaRecorder) on
+# a "secure context" - HTTPS, or http://localhost on the same machine.
+# A technician reaching this app from a phone/tablet over the hangar
+# LAN needs HTTPS, so `python -m backend.app` serves over a self-signed
+# certificate by default, generated once into CERTS_FOLDER and reused.
+#
+# Deliberately NOT Werkzeug's ssl_context="adhoc": that regenerates a
+# brand-new certificate every time the process (re)starts, and with
+# DEBUG=true the reloader restarts on its own - each restart would
+# invalidate the "proceed anyway" exception the browser just remembered,
+# so the page would look like it never loads.
+#
+# Browsers still show a one-time certificate warning to click through,
+# but only once per certificate (i.e. until CERTS_FOLDER is deleted).
+# Set to false to fall back to plain HTTP (fine for same-machine/
+# localhost use, where the browser already treats it as secure).
+HTTPS_ADHOC = os.getenv("HTTPS_ADHOC", "true").lower() == "true"
 
 ROLE_TECHNICIAN = "TECHNICIAN"
 
@@ -209,9 +232,11 @@ AICORE_EMBEDDING_MODEL = os.getenv(
     "text-embedding-3-large",
 )
 
-# Gemini is the only speech-capable family in the hub. Swap to
-# gemini-3.5-flash once you have confirmed it deploys in your region.
-AICORE_STT_MODEL = os.getenv("AICORE_STT_MODEL", "gemini-2.5-flash")
+# Gemini is the only speech-capable family in the hub. This must
+# match a RUNNING deployment's model name exactly - unlike the openai
+# proxy used for chat/embeddings, the google_vertexai proxy used here
+# does not resolve looser aliases.
+AICORE_STT_MODEL = os.getenv("AICORE_STT_MODEL", "gemini-3.5-flash")
 
 # Optional: target a deployment directly by its 16-character ID
 # (shown as the deployment title in AI Launchpad) instead of
