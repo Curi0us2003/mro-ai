@@ -30,7 +30,9 @@
     createSession: () => "/api/sessions",
     session: (id) => `/api/sessions/${id}`,
     sendVoice: (id) => `/api/sessions/${id}/voice`,
+    sendVoiceStream: (id) => `/api/sessions/${id}/voice/stream`,
     sendMessage: (id) => `/api/sessions/${id}/message`,
+    sendMessageStream: (id) => `/api/sessions/${id}/message/stream`,
     speak: (id) => `/api/sessions/${id}/speak`,
     records: (params) => `/api/records${params ? `?${params}` : ""}`,
     record: (id) => `/api/records/${id}`,
@@ -308,6 +310,7 @@
     turn.append(label, body);
     els.transcript.appendChild(turn);
     els.transcript.scrollTop = els.transcript.scrollHeight;
+    return body;
   }
 
   function clearTranscript() {
@@ -315,8 +318,34 @@
       '<p class="transcript__empty">Your conversation with the copilot will appear here.</p>';
   }
 
-  function playReply(url) {
-    if (!url || !els.toggleSpeak.checked) return;
+  // Sentences arrive one at a time as the reply streams in, each as
+  // its own short WAV clip. They're queued and played back to back
+  // so the audio keeps pace with the text instead of waiting for the
+  // whole reply to finish before anything is heard.
+  const audioQueue = [];
+  let audioPlaying = false;
+
+  function base64ToBlob(base64, mimeType) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mimeType });
+  }
+
+  function enqueueAudio(base64) {
+    if (!base64 || !els.toggleSpeak.checked) return;
+    const url = URL.createObjectURL(base64ToBlob(base64, "audio/wav"));
+    audioQueue.push(url);
+    if (!audioPlaying) playNextAudio();
+  }
+
+  function playNextAudio() {
+    const url = audioQueue.shift();
+    if (!url) {
+      audioPlaying = false;
+      return;
+    }
+    audioPlaying = true;
     els.replyAudio.src = url;
     els.replyAudio.play().catch(() => {
       // Autoplay can be blocked until the user interacts with the
@@ -325,9 +354,96 @@
     });
   }
 
+  els.replyAudio.addEventListener("ended", () => {
+    URL.revokeObjectURL(els.replyAudio.src);
+    playNextAudio();
+  });
+
   function stopPlayback() {
+    audioQueue.splice(0, audioQueue.length).forEach((url) => URL.revokeObjectURL(url));
+    audioPlaying = false;
     els.replyAudio.pause();
     els.replyAudio.removeAttribute("src");
+  }
+
+  // ------------------------------------------------------------
+  // Technician: streaming replies (NDJSON: text deltas + per-sentence audio)
+  // ------------------------------------------------------------
+
+  async function postStream(url, options) {
+    const response = await fetch(url, { credentials: "same-origin", ...options });
+
+    if (response.status === 401) {
+      showLogin("Your session expired. Sign in again.");
+      throw new ApiError("Not signed in", 401);
+    }
+
+    if (!response.ok) {
+      let message = `Request failed (${response.status})`;
+      const type = response.headers.get("content-type") || "";
+      if (type.includes("application/json")) {
+        const payload = await response.json().catch(() => null);
+        if (payload && payload.error) message = payload.error;
+      }
+      throw new ApiError(message, response.status);
+    }
+
+    return response.body;
+  }
+
+  async function* readNdjson(body) {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex;
+      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) yield JSON.parse(line);
+      }
+    }
+
+    const rest = buffer.trim();
+    if (rest) yield JSON.parse(rest);
+  }
+
+  async function streamAgentReply(url, fetchOptions) {
+    const body = await postStream(url, fetchOptions);
+
+    let assistantBody = null;
+    let fullText = "";
+
+    for await (const event of readNdjson(body)) {
+      switch (event.type) {
+        case "transcript":
+          appendTurn("technician", event.text);
+          break;
+        case "text":
+          fullText += event.delta;
+          if (!assistantBody) assistantBody = appendTurn("assistant", "");
+          assistantBody.textContent = fullText;
+          els.transcript.scrollTop = els.transcript.scrollHeight;
+          break;
+        case "audio":
+          enqueueAudio(event.audio_base64);
+          break;
+        case "audio_unavailable":
+          break; // no voice model installed yet - text-only is fine
+        case "done":
+          if (!assistantBody) assistantBody = appendTurn("assistant", "");
+          assistantBody.textContent = event.reply;
+          applyRecordState(event);
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   async function sendText(event) {
@@ -341,20 +457,11 @@
     setBusy(true, "Thinking…");
 
     try {
-      const data = await postJson(API.sendMessage(state.sessionId), { text });
-      appendTurn("assistant", data.reply);
-      applyRecordState(data);
-
-      // The text path returns no audio, so ask for it separately
-      // when the technician wants replies read aloud.
-      if (els.toggleSpeak.checked) {
-        try {
-          const audio = await postJson(API.speak(state.sessionId), { text: data.reply });
-          playReply(audio.reply_audio_url);
-        } catch (_err) {
-          /* silent: a missing voice model shouldn't break the turn */
-        }
-      }
+      await streamAgentReply(API.sendMessageStream(state.sessionId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
     } catch (err) {
       appendTurn("assistant", `Couldn't send that: ${err.message}`);
     } finally {
@@ -371,15 +478,13 @@
     setBusy(true, "Transcribing…");
 
     try {
-      const data = await api(API.sendVoice(state.sessionId), {
+      // The technician's own turn is appended from the "transcript"
+      // event in the stream, not here - it's not known until the
+      // recording has actually been transcribed server-side.
+      await streamAgentReply(API.sendVoiceStream(state.sessionId), {
         method: "POST",
         body: form,
       });
-
-      appendTurn("technician", data.transcript);
-      appendTurn("assistant", data.reply);
-      applyRecordState(data);
-      playReply(data.reply_audio_url);
     } catch (err) {
       appendTurn("assistant", `Couldn't process that recording: ${err.message}`);
     } finally {

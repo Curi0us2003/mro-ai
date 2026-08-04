@@ -221,6 +221,24 @@ def _chat_completion(messages: list[dict], tools: Optional[list] = None, tempera
     return chat.completions.create(**kwargs)
 
 
+def _chat_completion_stream(messages: list[dict], tools: Optional[list] = None, temperature: float = 0.2):
+    """Same call as _chat_completion, but returns a token-by-token stream."""
+    from gen_ai_hub.proxy.native.openai import chat
+
+    kwargs: dict = {"messages": messages, "temperature": temperature, "stream": True}
+
+    if AICORE_CHAT_DEPLOYMENT_ID:
+        kwargs["deployment_id"] = AICORE_CHAT_DEPLOYMENT_ID
+    else:
+        kwargs["model_name"] = AICORE_CHAT_MODEL
+
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    return chat.completions.create(**kwargs)
+
+
 # ==========================================================
 # Agent
 # ==========================================================
@@ -324,6 +342,94 @@ class MaintenanceAgent:
         )
         insert_conversation_message("assistant", fallback, self.record_id)
         return fallback
+
+    def send_stream(self, technician_utterance: str, max_tool_iterations: int = 5):
+        """
+        Same conversation turn as send(), but yields the reply as it is
+        generated instead of waiting for the whole thing:
+
+            {"type": "content", "text": "..."}   one per token/chunk of the
+                                                  final reply, in order
+            {"type": "done", "reply": "..."}      once, with the full text
+
+        Tool-calling turns (the model deciding to search the manuals or
+        save a record) are never streamed to the caller - only the final
+        natural-language reply is, exactly like send() only returns that.
+        This lets the caller (the Flask route) forward each piece to
+        text-to-speech and to the browser as soon as it exists, instead
+        of after the entire reply is ready.
+        """
+        insert_conversation_message("technician", technician_utterance, self.record_id)
+        self.messages.append({"role": "user", "content": technician_utterance})
+
+        for _ in range(max_tool_iterations):
+            stream = _chat_completion_stream(self.messages, tools=TOOLS)
+
+            content_parts: list[str] = []
+            tool_calls_acc: dict[int, dict] = {}
+
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                if getattr(delta, "tool_calls", None):
+                    for tc in delta.tool_calls:
+                        slot = tool_calls_acc.setdefault(
+                            tc.index, {"id": None, "name": None, "arguments": ""}
+                        )
+                        if tc.id:
+                            slot["id"] = tc.id
+                        if tc.function and tc.function.name:
+                            slot["name"] = tc.function.name
+                        if tc.function and tc.function.arguments:
+                            slot["arguments"] += tc.function.arguments
+                    continue
+
+                if getattr(delta, "content", None):
+                    content_parts.append(delta.content)
+                    yield {"type": "content", "text": delta.content}
+
+            if tool_calls_acc:
+                ordered = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+                self.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": tc["id"],
+                                "type": "function",
+                                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                            }
+                            for tc in ordered
+                        ],
+                    }
+                )
+                for tc in ordered:
+                    result = self._execute_tool(tc["name"], tc["arguments"])
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": json.dumps(result, default=str),
+                        }
+                    )
+                continue  # the next iteration should produce the final reply
+
+            reply = "".join(content_parts)
+            self.messages.append({"role": "assistant", "content": reply})
+            insert_conversation_message("assistant", reply, self.record_id)
+            yield {"type": "done", "reply": reply}
+            return
+
+        logger.warning("Max tool iterations reached for session %s", self.session_id)
+        fallback = (
+            "I've saved what you've told me so far - could you repeat or "
+            "clarify your last point?"
+        )
+        insert_conversation_message("assistant", fallback, self.record_id)
+        yield {"type": "done", "reply": fallback}
 
     def is_record_complete(self) -> bool:
         """Check whether every required field has been captured."""

@@ -192,12 +192,10 @@ def normalise_for_speech(text: str) -> str:
 
     spoken = text
 
-    # "[A320-AMM.pdf, p.147]" -> "see A320 A M M, page 147"
-    def _citation(match: re.Match) -> str:
-        source = match.group(1).rsplit(".", 1)[0].replace("_", " ").replace("-", " ")
-        return f"(see {source}, page {match.group(2)})"
-
-    spoken = _CITATION_PATTERN.sub(_citation, spoken)
+    # "[A320-AMM.pdf, p.147]" -> dropped entirely. Citations are for the
+    # written record and the PDF report - not useful read aloud, and a
+    # technician mid-task doesn't need to hear a file name and page number.
+    spoken = _CITATION_PATTERN.sub("", spoken)
 
     # "ATA 32-41" -> "A T A chapter 32, section 41"
     spoken = _ATA_PATTERN.sub(
@@ -223,6 +221,9 @@ def normalise_for_speech(text: str) -> str:
     # Markdown artefacts and list bullets have no spoken equivalent.
     spoken = re.sub(r"[*_`#]+", "", spoken)
     spoken = re.sub(r"^\s*[-•]\s*", "", spoken, flags=re.MULTILINE)
+
+    # Removing a citation can leave "engine , torque" or "engine ." behind.
+    spoken = re.sub(r"\s+([.,!?;:])", r"\1", spoken)
     spoken = re.sub(r"\s+", " ", spoken).strip()
 
     return spoken

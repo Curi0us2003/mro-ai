@@ -49,12 +49,15 @@ Run
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import re
 import uuid
 from datetime import timedelta
 from typing import Optional
 
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 from backend.config import (
@@ -98,7 +101,11 @@ from backend.speech_to_text import (
     RecordingTooLongError,
     TranscriptionError,
 )
-from backend.text_to_speech import synthesize_speech, VoiceModelNotFoundError
+from backend.text_to_speech import (
+    synthesize_speech,
+    synthesize_speech_bytes,
+    VoiceModelNotFoundError,
+)
 from backend.pdf_service import generate_report_for_record, MaintenanceRecordNotFoundError
 
 logging.basicConfig(level=LOG_LEVEL)
@@ -129,6 +136,113 @@ def _require_own_session(session_id: str):
         return None, (jsonify({"error": "That session belongs to someone else."}), 403)
 
     return agent, None
+
+
+# ==========================================================
+# Streaming replies (text + speech as the model generates them)
+# --------------------------------------------------------
+# Instead of waiting for the whole reply then synthesizing the
+# whole thing as one WAV, the reply is streamed token-by-token
+# from the model, and each completed *sentence* is synthesized
+# and sent to the browser as soon as it's ready. The browser
+# plays clips back to back as they arrive, so audio starts after
+# the first sentence instead of after the entire reply - both
+# faster and closer to "the copilot is speaking as it thinks".
+# ==========================================================
+
+_SENTENCE_BOUNDARY = re.compile(r"[.!?]\s+")
+_BARE_LIST_MARKER = re.compile(r"^\d{1,3}\.?$")
+
+
+def _next_sentence_end(buffer: str) -> Optional[int]:
+    """
+    Find where the first real sentence in `buffer` ends, or None if
+    there isn't a complete one yet.
+
+    A numbered step like "2. Remove the engine cowlings." has a
+    period-space right after the "2" too, which looks exactly like a
+    sentence end - split there and the reply is read aloud as a run
+    of isolated digits ("Two. Three. Four."). Skip any boundary whose
+    candidate sentence is nothing but a bare list marker.
+    """
+    search_from = 0
+    while True:
+        match = _SENTENCE_BOUNDARY.search(buffer, search_from)
+        if not match:
+            return None
+        candidate = buffer[:match.start()].strip()
+        if not candidate or _BARE_LIST_MARKER.match(candidate):
+            search_from = match.end()
+            continue
+        return match.end()
+
+
+def _ndjson_line(payload: dict) -> bytes:
+    return (json.dumps(payload, default=str) + "\n").encode("utf-8")
+
+
+def _sentence_audio_event(sentence: str) -> dict:
+    try:
+        audio_bytes = synthesize_speech_bytes(sentence)
+        return {
+            "type": "audio",
+            "text": sentence,
+            "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+        }
+    except VoiceModelNotFoundError as exc:
+        logger.warning("Piper voice missing, skipping audio for a sentence: %s", exc)
+        return {"type": "audio_unavailable", "text": sentence}
+    except Exception:  # noqa: BLE001
+        logger.exception("Sentence synthesis failed")
+        return {"type": "audio_unavailable", "text": sentence}
+
+
+def _stream_turn(agent: MaintenanceAgent, technician_utterance: str, transcript: Optional[str] = None):
+    """
+    Generator of NDJSON-encoded lines for a Flask streaming Response.
+    One JSON object per line:
+        {"type": "transcript", "text": ...}          voice turns only, first
+        {"type": "text", "delta": ...}                 as the reply streams in
+        {"type": "audio", "text": ..., "audio_base64": ...}   one per sentence
+        {"type": "audio_unavailable", "text": ...}     Piper voice not installed
+        {"type": "done", "reply": ..., "record_id": ..., "record_complete": ...}
+    """
+    if transcript is not None:
+        yield _ndjson_line({"type": "transcript", "text": transcript})
+
+    buffer = ""
+    full_reply = ""
+
+    for event in agent.send_stream(technician_utterance):
+        if event["type"] == "content":
+            delta = event["text"]
+            full_reply += delta
+            buffer += delta
+            yield _ndjson_line({"type": "text", "delta": delta})
+
+            while True:
+                end = _next_sentence_end(buffer)
+                if end is None:
+                    break
+                sentence, buffer = buffer[:end], buffer[end:]
+                sentence = sentence.strip()
+                if sentence:
+                    yield _ndjson_line(_sentence_audio_event(sentence))
+        else:
+            full_reply = event["reply"]
+
+    remaining = buffer.strip()
+    if remaining:
+        yield _ndjson_line(_sentence_audio_event(remaining))
+
+    yield _ndjson_line(
+        {
+            "type": "done",
+            "reply": full_reply,
+            "record_id": agent.record_id,
+            "record_complete": agent.is_record_complete(),
+        }
+    )
 
 
 # ==========================================================
@@ -370,6 +484,60 @@ def register_routes(app: Flask) -> None:
                 "record_id": agent.record_id,
                 "record_complete": agent.is_record_complete(),
             }
+        )
+
+    @app.route("/api/sessions/<session_id>/message/stream", methods=["POST"])
+    @role_required(ROLE_TECHNICIAN)
+    def send_text_message_stream(session_id):
+        """
+        Streaming counterpart to /message: the reply is sent back as
+        newline-delimited JSON, one sentence's audio (and every text
+        delta) as soon as it's ready, instead of one JSON blob after
+        the whole reply and its WAV file are both fully generated.
+        """
+        agent, error = _require_own_session(session_id)
+        if error:
+            return error
+
+        body = request.get_json(silent=True) or {}
+        text = (body.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "Type a message before sending."}), 400
+
+        return Response(_stream_turn(agent, text), mimetype="application/x-ndjson")
+
+    @app.route("/api/sessions/<session_id>/voice/stream", methods=["POST"])
+    @role_required(ROLE_TECHNICIAN)
+    def send_voice_message_stream(session_id):
+        """Streaming counterpart to /voice - see send_text_message_stream."""
+        agent, error = _require_own_session(session_id)
+        if error:
+            return error
+
+        if "audio" not in request.files:
+            return jsonify({"error": "No recording was attached."}), 400
+
+        audio_file = request.files["audio"]
+        original_name = secure_filename(audio_file.filename or "recording.webm")
+
+        try:
+            transcript = transcribe_audio_bytes(audio_file.read(), original_name)
+        except UnsupportedAudioFormatError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RecordingTooLongError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except TranscriptionError as exc:
+            logger.exception("Transcription failed")
+            return jsonify({"error": str(exc)}), 502
+
+        if not transcript:
+            return jsonify(
+                {"error": "No speech was picked up. Move closer to the mic and try again."}
+            ), 422
+
+        return Response(
+            _stream_turn(agent, transcript, transcript=transcript),
+            mimetype="application/x-ndjson",
         )
 
     @app.route("/api/sessions/<session_id>/speak", methods=["POST"])
