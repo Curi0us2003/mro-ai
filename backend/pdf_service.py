@@ -34,6 +34,7 @@ Example
 
 from __future__ import annotations
 
+import io
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,7 +44,10 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
+    Image,
+    KeepTogether,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -57,7 +61,12 @@ from backend.config import (
     PDF_TITLE,
     LOG_LEVEL,
 )
-from backend.database import get_maintenance_record, get_conversation
+from backend.database import (
+    get_maintenance_record,
+    get_conversation,
+    list_record_photos,
+    get_record_photo,
+)
 
 logging.basicConfig(level=LOG_LEVEL)
 logger = logging.getLogger("mro_copilot.pdf_service")
@@ -129,6 +138,17 @@ def _build_styles() -> dict:
             textColor=colors.HexColor("#333333"),
             spaceAfter=6,
             leftIndent=12,
+        )
+    )
+    # Caption under a photographic evidence plate.
+    styles.add(
+        ParagraphStyle(
+            name="PhotoCaption",
+            fontName=PDF_FONT,
+            fontSize=8,
+            leading=11,
+            textColor=colors.HexColor("#666666"),
+            spaceAfter=0,
         )
     )
     return styles
@@ -243,10 +263,86 @@ def _build_conversation_section(styles, conversation: list[dict]) -> list:
 # Public API
 # ==========================================================
 
+def _build_photo_section(styles, photos: list[dict], max_width: float) -> list:
+    """
+    Reproduce the attached damage photos as evidence plates.
+
+    Each plate is scaled to fit the text column and capped in height so a
+    portrait phone photo cannot push a whole page of white space ahead of
+    itself. KeepTogether stops a caption from being orphaned onto the next
+    page away from its image.
+
+    A photo that fails to load is reported in the PDF rather than silently
+    dropped - a report that quietly omits evidence is worse than one that
+    says a plate was unreadable.
+    """
+    story: list = [Paragraph("Photographic Evidence", styles["SectionHeading"])]
+
+    max_height = 3.6 * inch
+    total = len(photos)
+
+    for index, meta in enumerate(photos, start=1):
+        photo = get_record_photo(meta["PHOTO_ID"])
+
+        if not photo or not photo.get("IMAGE_DATA"):
+            story.append(
+                Paragraph(
+                    f"Photo {index} of {total} could not be read from storage.",
+                    styles["BodyTextCustom"],
+                )
+            )
+            continue
+
+        # Decode NOW rather than handing raw bytes to Image(). reportlab
+        # defers reading until doc.build(), so a corrupt blob would blow up
+        # far from here - past any try/except around this loop - and take
+        # the whole report with it. ImageReader parses eagerly, which both
+        # surfaces the problem at a point we can report it and yields the
+        # true pixel size instead of trusting the stored WIDTH/HEIGHT.
+        try:
+            width, height = ImageReader(io.BytesIO(photo["IMAGE_DATA"])).getSize()
+        except Exception:  # noqa: BLE001 - Pillow/reportlab raise various types
+            logger.exception("Could not decode photo %s for the report", meta.get("PHOTO_ID"))
+            story.append(
+                Paragraph(
+                    f"Photo {index} of {total} is attached to this record but "
+                    f"could not be rendered.",
+                    styles["BodyTextCustom"],
+                )
+            )
+            continue
+
+        scale = min(max_width / width, max_height / height, 1.0)
+
+        caption_bits = [f"Photo {index} of {total}"]
+        if photo.get("CAPTION"):
+            caption_bits.append(_fmt(photo["CAPTION"]))
+        if photo.get("CREATED_AT"):
+            caption_bits.append(f"attached {_fmt(photo['CREATED_AT'])}")
+
+        # A fresh stream: Image() wants a file-like it can read itself, and
+        # the one above has already been consumed by the validation decode.
+        story.append(
+            KeepTogether([
+                Image(
+                    io.BytesIO(photo["IMAGE_DATA"]),
+                    width=width * scale,
+                    height=height * scale,
+                ),
+                Spacer(1, 0.06 * inch),
+                Paragraph(" &middot; ".join(caption_bits), styles["PhotoCaption"]),
+                Spacer(1, 0.18 * inch),
+            ])
+        )
+
+    return story
+
+
 def generate_maintenance_report(
     record: dict,
     conversation: Optional[list[dict]] = None,
     output_path: Optional[Path] = None,
+    photos: Optional[list[dict]] = None,
 ) -> Path:
     """
     Render a maintenance record (and optional conversation
@@ -286,6 +382,12 @@ def generate_maintenance_report(
     story.append(Paragraph("Recommended Action", styles["SectionHeading"]))
     story.append(Paragraph(_fmt(record.get("RECOMMENDED_ACTION")), styles["BodyTextCustom"]))
 
+    # Evidence comes before the transcript: a reader wants to see the
+    # damage next to the finding, not after pages of dialogue.
+    if photos:
+        story.append(Spacer(1, 0.1 * inch))
+        story.extend(_build_photo_section(styles, photos, doc.width))
+
     if conversation:
         story.append(Spacer(1, 0.1 * inch))
         story.extend(_build_conversation_section(styles, conversation))
@@ -306,4 +408,14 @@ def generate_report_for_record(record_id: str, include_conversation: bool = True
         raise MaintenanceRecordNotFoundError(f"No maintenance record found with id '{record_id}'")
 
     conversation = get_conversation(record_id) if include_conversation else None
-    return generate_maintenance_report(record, conversation=conversation)
+
+    # Metadata only here; the bytes are fetched per photo while the plates
+    # are laid out, so a record with eight photos doesn't load them all
+    # into memory at once.
+    photos = list_record_photos(record_id)
+
+    return generate_maintenance_report(
+        record,
+        conversation=conversation,
+        photos=photos,
+    )

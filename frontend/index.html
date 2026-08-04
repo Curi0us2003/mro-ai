@@ -4,22 +4,37 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Maintenance Voice Copilot</title>
+<link rel="icon" href="logo.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
   <!-- ============================================================
        SHELL BAR
+       The logo lives here, top-left, on every screen. If logo.png
+       hasn't been dropped into frontend/ yet, the inline SVG mark
+       behind it stays visible instead of a broken-image icon.
   ============================================================= -->
   <header class="shell-bar">
     <div class="shell-bar__brand">
-      <span class="shell-bar__logo" aria-hidden="true">✈</span>
-      <span class="shell-bar__title">AI Maintenance Voice Copilot</span>
+      <span class="brand-mark">
+        <img src="logo.png" alt="" class="brand-mark__img" id="brand-logo" hidden>
+        <svg class="brand-mark__fallback" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 16v-2l-8-2.5V6.5a1.5 1.5 0 0 0-3 0v5L2 14v2l8-2.5V19l-2.5 1.5V22L11.5 21l3.5 1v-1.5L12.5 19v-5.5L21 16Z"
+                fill="currentColor"/>
+        </svg>
+      </span>
+      <span class="shell-bar__titles">
+        <span class="shell-bar__title">AI Maintenance Voice Copilot</span>
+        <span class="shell-bar__subtitle">Hands-free inspection recording</span>
+      </span>
     </div>
 
     <div class="shell-bar__end" id="shell-user" hidden>
-      <span class="shell-user__name" id="shell-user-name">—</span>
-      <span class="shell-user__role" id="shell-user-role">—</span>
+      <span class="shell-user__meta">
+        <span class="shell-user__name" id="shell-user-name">—</span>
+        <span class="shell-user__role" id="shell-user-role">—</span>
+      </span>
       <button class="btn btn--ghost btn--small btn--on-dark" id="btn-sign-out">Sign out</button>
     </div>
   </header>
@@ -27,31 +42,84 @@
   <main class="app-main">
 
     <!-- ============================================================
-         LOGIN
-         Accounts are provisioned by an administrator. There is no
-         sign-up path here, on purpose.
+         LANDING / SIGN IN
+         Two panes: a full-bleed visual on the left, the sign-in form
+         on the right. Accounts are provisioned by an administrator -
+         there is no sign-up path here, on purpose.
     ============================================================= -->
-    <section id="view-login" class="view is-active">
-      <form class="panel panel--login" id="form-login">
-        <h1 class="panel__title">Sign in</h1>
-        <p class="panel__hint">Use the account your maintenance administrator issued you.</p>
+    <section id="view-login" class="view view--split is-active">
 
-        <label class="field-label" for="input-username">Username</label>
-        <input type="text" id="input-username" class="text-input text-input--block"
-               autocomplete="username" autocapitalize="off" autocorrect="off"
-               spellcheck="false" maxlength="64" required>
+      <!-- Left: the visual. image.png goes in frontend/. Until it's
+           there, the gradient underneath carries the panel on its own. -->
+      <aside class="landing-visual">
+        <img src="image.png" alt="" class="landing-visual__img" id="landing-image" hidden>
+        <div class="landing-visual__scrim"></div>
 
-        <label class="field-label" for="input-password">Password</label>
-        <input type="password" id="input-password" class="text-input text-input--block"
-               autocomplete="current-password" maxlength="256" required>
+        <div class="landing-visual__content">
+          <p class="landing-visual__eyebrow">SAP BTP · HANA Cloud · AI Core</p>
+          <h1 class="landing-visual__headline">
+            Log findings out loud.<br>Keep both hands on the aircraft.
+          </h1>
+          <p class="landing-visual__lede">
+            Speak what you see. The copilot asks only what's still missing,
+            cites the manual it read it in, and files a complete maintenance
+            record before you've put the torque wrench down.
+          </p>
 
-        <button type="submit" class="btn btn--primary btn--full" id="btn-login">Sign in</button>
-        <p class="field-error" id="login-error" role="alert"></p>
+          <ul class="landing-visual__points">
+            <li>
+              <span class="landing-point__icon" aria-hidden="true">🎙</span>
+              <span><strong>Voice in, voice out.</strong> Transcribed by Gemini,
+                    read back locally — no screen, no gloves off.</span>
+            </li>
+            <li>
+              <span class="landing-point__icon" aria-hidden="true">📖</span>
+              <span><strong>Answers from your manuals.</strong> Semantic search over
+                    ingested AMM/IPC documents, quoted with page numbers.</span>
+            </li>
+            <li>
+              <span class="landing-point__icon" aria-hidden="true">📄</span>
+              <span><strong>Report-ready.</strong> Every finding lands in HANA Cloud
+                    as a structured record you can export as a PDF.</span>
+            </li>
+          </ul>
+        </div>
+      </aside>
 
-        <p class="panel__footnote">
-          No account? Accounts are created by your administrator — they can't be self-registered.
-        </p>
-      </form>
+      <!-- Right: sign in -->
+      <div class="landing-form">
+        <form class="login-card" id="form-login">
+          <h2 class="login-card__title">Sign in</h2>
+          <p class="login-card__hint">Use the account your maintenance administrator issued you.</p>
+
+          <label class="field-label" for="input-username">Username</label>
+          <input type="text" id="input-username" class="text-input text-input--block"
+                 autocomplete="username" autocapitalize="off" autocorrect="off"
+                 spellcheck="false" maxlength="64" placeholder="jsmith" required>
+
+          <label class="field-label" for="input-password">Password</label>
+          <input type="password" id="input-password" class="text-input text-input--block"
+                 autocomplete="current-password" maxlength="256" placeholder="••••••••" required>
+
+          <button type="submit" class="btn btn--primary btn--full btn--tall" id="btn-login">Sign in</button>
+          <p class="field-error" id="login-error" role="alert"></p>
+
+          <div class="login-card__roles">
+            <div class="role-chip">
+              <span class="role-chip__tag">Technician</span>
+              <span class="role-chip__text">Runs inspection sessions, sees their own findings</span>
+            </div>
+            <div class="role-chip">
+              <span class="role-chip__tag">Supervisor</span>
+              <span class="role-chip__text">Reviews and reports on every technician's records</span>
+            </div>
+          </div>
+
+          <p class="login-card__footnote">
+            No account? Accounts are created by your administrator — they can't be self-registered.
+          </p>
+        </form>
+      </div>
     </section>
 
     <!-- ============================================================
@@ -59,68 +127,132 @@
     ============================================================= -->
     <section id="view-technician" class="view">
 
-      <!-- Start-session panel -->
-      <div class="panel panel--start" id="panel-start">
-        <h1 class="panel__title">Start an inspection</h1>
-        <p class="panel__hint">
-          Begin a voice-guided session. Findings are recorded against your name automatically.
-        </p>
-        <button class="btn btn--primary btn--full" id="btn-start-session">Start session</button>
-        <p class="field-error" id="start-session-error" role="alert"></p>
+      <!-- ---------- Start of session: brief the technician ---------- -->
+      <div class="start-page" id="panel-start">
+
+        <div class="start-hero">
+          <div class="start-hero__text">
+            <span class="eyebrow">Inspection session</span>
+            <h1 class="start-hero__title">
+              Ready when you are, <span id="start-hero-name">technician</span>.
+            </h1>
+            <p class="start-hero__lede">
+              Start a session and just talk. Findings are attributed to you
+              automatically and saved as you speak — you never have to
+              remember to hit save.
+            </p>
+            <div class="start-hero__actions">
+              <button class="btn btn--primary btn--tall" id="btn-start-session">
+                Start session
+              </button>
+              <span class="start-hero__aside">Takes a second — the mic opens straight away.</span>
+            </div>
+            <p class="field-error" id="start-session-error" role="alert"></p>
+          </div>
+
+          <!-- How a turn actually flows -->
+          <ol class="flow-steps">
+            <li class="flow-step">
+              <span class="flow-step__num">1</span>
+              <div>
+                <p class="flow-step__title">Speak the finding</p>
+                <p class="flow-step__text">Tap the mic and describe what you see, in your own words.</p>
+              </div>
+            </li>
+            <li class="flow-step">
+              <span class="flow-step__num">2</span>
+              <div>
+                <p class="flow-step__title">Answer one question</p>
+                <p class="flow-step__text">The copilot asks only for what's still missing — one thing at a time.</p>
+              </div>
+            </li>
+            <li class="flow-step">
+              <span class="flow-step__num">3</span>
+              <div>
+                <p class="flow-step__title">Record files itself</p>
+                <p class="flow-step__text">Saved to HANA Cloud as you go, and exportable as a PDF report.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <!-- What a complete record needs -->
+        <div class="start-grid">
+          <div class="card card--fields">
+            <div class="card__header-row">
+              <h2 class="card__title">What a complete finding needs</h2>
+              <span class="status-pill">7 fields</span>
+            </div>
+            <p class="card__note">
+              You don't need to give these in order, or all at once. Say what you
+              know and the copilot will chase the rest.
+            </p>
+            <ul class="field-chips">
+              <li>Aircraft registration</li>
+              <li>Component</li>
+              <li>Finding</li>
+              <li>Severity</li>
+              <li>Location</li>
+              <li>Recommended action</li>
+              <li class="is-auto">Technician <span>auto</span></li>
+            </ul>
+          </div>
+
+          <div class="card card--tips">
+            <h2 class="card__title">Getting the most out of it</h2>
+            <ul class="tip-list">
+              <li>
+                <strong>Ask it things.</strong> "What's the torque on the main gear
+                axle nut?" — it searches your ingested manuals and quotes the page.
+              </li>
+              <li>
+                <strong>Say identifiers naturally.</strong> Registrations, ATA
+                chapters and part numbers are tuned for aviation speech.
+              </li>
+              <li>
+                <strong>Typing works too.</strong> Too loud in the hangar? Use the
+                text box in the composer instead.
+              </li>
+              <li>
+                <strong>It won't invent specs.</strong> If the manuals don't cover
+                something, it says so rather than guessing.
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
 
-      <!-- Active session workspace -->
+      <!-- ---------- Active session: details LEFT, chat RIGHT ---------- -->
       <div class="workspace" id="workspace" hidden>
 
-        <div class="workspace__top">
-          <div class="session-info">
-            <span class="session-info__label">Technician</span>
-            <span class="session-info__value" id="session-technician-name">—</span>
-          </div>
-          <button class="btn btn--ghost btn--small" id="btn-end-session">End session</button>
-        </div>
+        <!-- LEFT: session + finding detail -->
+        <aside class="workspace__side">
 
-        <!-- Voice hero control -->
-        <div class="voice-hero">
-          <button class="mic-btn" id="btn-mic" aria-label="Start recording">
-            <svg class="mic-btn__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/>
-              <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.93V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.07A7 7 0 0 0 19 11Z" fill="currentColor"/>
-            </svg>
-            <span class="mic-btn__ring"></span>
-          </button>
-          <p class="voice-hero__status" id="voice-status">Tap to speak a finding</p>
-        </div>
-
-        <!-- Text fallback -->
-        <form class="text-fallback" id="form-text-fallback">
-          <input type="text" id="input-text-message" class="text-input"
-                 placeholder="Or type instead of speaking…" autocomplete="off">
-          <button type="submit" class="btn btn--secondary">Send</button>
-        </form>
-
-        <div class="workspace__grid">
-
-          <!-- Transcript / conversation -->
-          <div class="card card--transcript">
-            <div class="card__header-row">
-              <h2 class="card__title">Conversation</h2>
-              <label class="toggle" for="toggle-speak">
-                <input type="checkbox" id="toggle-speak" checked>
-                <span>Read replies aloud</span>
-              </label>
+          <div class="session-card">
+            <div class="session-card__row">
+              <div class="session-info">
+                <span class="session-info__label">Technician</span>
+                <span class="session-info__value" id="session-technician-name">—</span>
+              </div>
+              <button class="btn btn--ghost btn--small" id="btn-end-session">End session</button>
             </div>
-            <div class="transcript" id="transcript" aria-live="polite">
-              <p class="transcript__empty">Your conversation with the copilot will appear here.</p>
+            <div class="session-card__live">
+              <span class="live-dot" aria-hidden="true"></span>
+              <span>Session active — everything you say is being recorded</span>
             </div>
-            <audio id="reply-audio" hidden></audio>
           </div>
 
-          <!-- Current record status -->
           <div class="card card--record">
             <div class="card__header-row">
               <h2 class="card__title">Current finding</h2>
               <span class="status-pill" id="record-status-pill">Not started</span>
+            </div>
+
+            <div class="record-progress">
+              <div class="record-progress__bar">
+                <span class="record-progress__fill" id="record-progress-fill"></span>
+              </div>
+              <span class="record-progress__text" id="record-progress-text">0 of 7 captured</span>
             </div>
 
             <dl class="record-fields" id="record-fields">
@@ -130,6 +262,7 @@
               <div class="record-fields__row"><dt>Severity</dt><dd data-field="SEVERITY">—</dd></div>
               <div class="record-fields__row"><dt>Location</dt><dd data-field="LOCATION">—</dd></div>
               <div class="record-fields__row"><dt>Recommended action</dt><dd data-field="RECOMMENDED_ACTION">—</dd></div>
+              <div class="record-fields__row"><dt>Technician</dt><dd data-field="TECHNICIAN">—</dd></div>
             </dl>
 
             <button class="btn btn--primary btn--full" id="btn-download-report" disabled>
@@ -137,52 +270,209 @@
             </button>
           </div>
 
+          <!-- Damage photos: entirely optional evidence.
+               "Take photo" carries capture=environment, so a phone or
+               tablet opens the rear camera directly; on a laptop both
+               buttons open a file picker. Hidden altogether until the
+               RECORD_PHOTOS table exists. -->
+          <div class="card card--photos" id="card-photos" hidden>
+            <div class="card__header-row">
+              <h2 class="card__title">Damage photos</h2>
+              <span class="status-pill" id="photo-count-pill">Optional</span>
+            </div>
+
+            <p class="card__note" id="photo-hint">
+              Attach a photo as proof. It goes into the PDF report and is
+              visible to your supervisor.
+            </p>
+
+            <div class="photo-actions">
+              <button type="button" class="btn btn--secondary btn--small" id="btn-take-photo">
+                📷 Take photo
+              </button>
+              <button type="button" class="btn btn--ghost btn--small" id="btn-upload-photo">
+                Upload
+              </button>
+            </div>
+
+            <!-- capture= asks the OS for the camera rather than the gallery -->
+            <input type="file" id="input-photo-camera" accept="image/*"
+                   capture="environment" hidden>
+            <input type="file" id="input-photo-file" accept="image/*" multiple hidden>
+
+            <p class="field-error" id="photo-error" role="alert"></p>
+
+            <div class="photo-grid" id="photo-grid"></div>
+          </div>
+        </aside>
+
+        <!-- RIGHT: the conversation -->
+        <div class="chat" id="chat">
+          <div class="chat__header">
+            <div>
+              <h2 class="card__title">Conversation</h2>
+              <p class="chat__status" id="voice-status">Tap to speak a finding</p>
+            </div>
+            <label class="toggle" for="toggle-speak">
+              <input type="checkbox" id="toggle-speak" checked>
+              <span>Read replies aloud</span>
+            </label>
+          </div>
+
+          <!-- Scrolls independently; pinned to the newest turn unless the
+               technician has deliberately scrolled up to re-read something. -->
+          <div class="chat__scroll" id="transcript" aria-live="polite">
+            <div class="chat__empty" id="chat-empty">
+              <span class="chat__empty-icon" aria-hidden="true">🎙</span>
+              <p class="chat__empty-title">Nothing logged yet</p>
+              <p class="chat__empty-text">
+                Tap the mic and describe what you're looking at — for example
+                “Found corrosion on the left main gear trunnion of VT-ABC.”
+              </p>
+            </div>
+          </div>
+
+          <button class="chat__jump" id="btn-jump-latest" hidden>
+            Jump to latest ↓
+          </button>
+
+          <!-- Composer: mic and typing share one bar -->
+          <form class="composer" id="form-text-fallback">
+            <button type="button" class="mic-btn" id="btn-mic" aria-label="Start recording">
+              <svg class="mic-btn__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" fill="currentColor"/>
+                <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.93V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.07A7 7 0 0 0 19 11Z" fill="currentColor"/>
+              </svg>
+              <span class="mic-btn__ring"></span>
+            </button>
+
+            <input type="text" id="input-text-message" class="text-input composer__input"
+                   placeholder="Or type a finding or a question…" autocomplete="off">
+            <button type="submit" class="btn btn--secondary" id="btn-send">Send</button>
+          </form>
+
+          <audio id="reply-audio" hidden></audio>
         </div>
       </div>
     </section>
 
     <!-- ============================================================
          SUPERVISOR VIEW
+         The list is the page. Selecting a finding expands it in place
+         rather than filling a cramped side panel.
     ============================================================= -->
     <section id="view-supervisor" class="view">
 
       <div class="panel__header-row">
-        <h1 class="panel__title">Maintenance records</h1>
+        <div>
+          <span class="eyebrow">Oversight</span>
+          <h1 class="panel__title">Maintenance records</h1>
+        </div>
         <div class="supervisor-toolbar">
-          <input type="text" id="input-filter-aircraft" class="text-input text-input--small"
-                 placeholder="Filter by aircraft reg.">
+          <span class="records-count" id="records-count">—</span>
           <button class="btn btn--secondary btn--small" id="btn-refresh-records">Refresh</button>
         </div>
       </div>
 
-      <div class="records-layout">
-        <div class="card card--records-table">
-          <table class="records-table">
-            <thead>
-              <tr>
-                <th>Aircraft</th>
-                <th>Component</th>
-                <th>Severity</th>
-                <th>Status</th>
-                <th>Technician</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody id="records-table-body">
-              <tr><td colspan="6" class="records-table__empty">Loading records…</td></tr>
-            </tbody>
-          </table>
+      <!-- Filter bar. Dropdowns are populated from the values that
+           actually exist in the records (GET /api/records/filters);
+           the search box is free text across several columns. -->
+      <div class="filter-bar">
+        <div class="filter-bar__search">
+          <span class="filter-bar__search-icon" aria-hidden="true">🔍</span>
+          <input type="search" id="input-filter-search" class="text-input filter-bar__input"
+                 placeholder="Search finding, aircraft, component or location…"
+                 autocomplete="off">
         </div>
 
-        <div class="card card--record-detail" id="record-detail">
-          <p class="record-detail__placeholder">
-            Select a record to view its full details and conversation transcript.
-          </p>
+        <div class="filter-bar__selects">
+          <label class="filter-field">
+            <span class="filter-field__label">Aircraft</span>
+            <select class="select" id="filter-aircraft" data-filter="aircraft_reg">
+              <option value="">All</option>
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span class="filter-field__label">Component</span>
+            <select class="select" id="filter-component" data-filter="component">
+              <option value="">All</option>
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span class="filter-field__label">Severity</span>
+            <select class="select" id="filter-severity" data-filter="severity">
+              <option value="">Any</option>
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span class="filter-field__label">Status</span>
+            <select class="select" id="filter-status" data-filter="status">
+              <option value="">Any</option>
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span class="filter-field__label">Technician</span>
+            <select class="select" id="filter-technician" data-filter="technician">
+              <option value="">All</option>
+            </select>
+          </label>
+
+          <button class="btn btn--ghost btn--small" id="btn-clear-filters" hidden>
+            Clear filters
+          </button>
         </div>
+      </div>
+
+      <div class="records-list" id="records-list">
+        <p class="records-list__empty">Loading records…</p>
       </div>
     </section>
 
   </main>
+
+  <!-- ============================================================
+       SUPERVISOR ASSISTANT
+       Floating, always reachable, and aware of whichever finding is
+       expanded in the list behind it. Supervisors only.
+  ============================================================= -->
+  <div class="chatbot" id="chatbot" hidden>
+
+    <button class="chatbot__fab" id="btn-chatbot-toggle"
+            aria-label="Open the maintenance assistant" aria-expanded="false">
+      <svg class="chatbot__fab-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.36 3.2 5.73-.1 1.2-.5 2.3-1.2 3.27-.2.28 0 .66.34.6 1.9-.36 3.4-1.2 4.3-1.9.75.16 1.54.25 2.36.25 4.97 0 9-3.36 9-7.95S16.97 3 12 3Z"
+              fill="currentColor"/>
+      </svg>
+      <span class="chatbot__fab-close" aria-hidden="true">✕</span>
+    </button>
+
+    <section class="chatbot__panel" id="chatbot-panel" hidden aria-label="Maintenance assistant">
+      <header class="chatbot__header">
+        <div class="chatbot__heading">
+          <h2 class="chatbot__title">Maintenance assistant</h2>
+          <p class="chatbot__context" id="chatbot-context">Ask about any aircraft system</p>
+        </div>
+        <div class="chatbot__actions">
+          <button class="chatbot__icon-btn" id="btn-chatbot-reset"
+                  title="Start a new conversation" aria-label="Start a new conversation">⟲</button>
+          <button class="chatbot__icon-btn" id="btn-chatbot-close"
+                  title="Close" aria-label="Close the assistant">✕</button>
+        </div>
+      </header>
+
+      <div class="chatbot__scroll" id="chatbot-messages" aria-live="polite"></div>
+
+      <form class="chatbot__composer" id="form-chatbot">
+        <input type="text" id="input-chatbot" class="text-input"
+               placeholder="Ask about this finding or any system…" autocomplete="off">
+        <button type="submit" class="btn btn--primary btn--small" id="btn-chatbot-send">Send</button>
+      </form>
+    </section>
+  </div>
 
   <script src="app.js"></script>
 </body>

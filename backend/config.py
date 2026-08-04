@@ -151,6 +151,21 @@ SESSION_COOKIE_SECURE = (
 # localhost use, where the browser already treats it as secure).
 HTTPS_ADHOC = os.getenv("HTTPS_ADHOC", "true").lower() == "true"
 
+# ==========================================================
+# Startup warmup
+# ==========================================================
+# Three things are expensive exactly once per process and were
+# being paid for by whoever happened to send the first voice turn:
+#
+#   Piper voice load          ~4.0s  (parses a ~50 MB ONNX graph)
+#   Piper first synthesis     ~5.2s  (ONNX runtime warmup; ~0.1s after)
+#   AI Core proxy client init ~4.2s  (OAuth token + deployment lookup)
+#
+# Doing them in a background thread at startup moves ~13s off the
+# first reply. The thread is a daemon and swallows its own errors -
+# a warmup failure must never stop the app from serving.
+WARMUP_ON_STARTUP = os.getenv("WARMUP_ON_STARTUP", "true").lower() == "true"
+
 ROLE_TECHNICIAN = "TECHNICIAN"
 
 ROLE_SUPERVISOR = "SUPERVISOR"
@@ -174,6 +189,18 @@ HANA_SCHEMA = os.getenv("HANA_SCHEMA", "")
 HANA_ENCRYPT = (
     os.getenv("HANA_ENCRYPT", "true").lower() == "true"
 )
+
+# How many open connections backend.database keeps in its pool.
+#
+# Opening a connection to HANA Cloud costs a TCP connect plus a full
+# TLS handshake - measured at ~3.7s from a developer machine, versus
+# ~0.2s for a query on an already-open connection. Since a single
+# voice turn hits the database several times, connections are pooled
+# and reused rather than dialled per query.
+#
+# Size this at or above the number of concurrent request threads that
+# touch the database; anything beyond that is just idle sockets.
+HANA_POOL_SIZE = int(os.getenv("HANA_POOL_SIZE", "8"))
 
 # Optional
 
@@ -308,6 +335,30 @@ PIPER_SENTENCE_SILENCE = float(os.getenv("PIPER_SENTENCE_SILENCE", "0.35"))
 # Piper writes WAV. Keep it - the browser plays it natively and
 # there is no transcoding dependency.
 TTS_OUTPUT_FORMAT = "wav"
+
+# ==========================================================
+# Damage Photos
+# ==========================================================
+# Optional evidence a technician attaches to a finding, either from
+# the device camera or a file. Stored in HANA (RECORD_PHOTOS - see
+# schema_record_photos.sql) and reproduced in the PDF report.
+
+SUPPORTED_PHOTO_FORMATS = {"jpg", "jpeg", "png", "webp", "heic", "heif", "bmp", "gif"}
+
+# Cap on what a client may post, before processing. Phone cameras
+# produce 3-8 MB per shot; this leaves room for a couple of those
+# while still rejecting an accidental video upload.
+PHOTO_MAX_UPLOAD_BYTES = int(os.getenv("PHOTO_MAX_UPLOAD_BYTES", str(12 * 1024 * 1024)))
+
+# Long-edge limit after processing. 1600px is plenty for judging
+# corrosion on screen and for a full-width PDF plate, at a fraction
+# of the storage and transfer of the original.
+PHOTO_MAX_DIMENSION = int(os.getenv("PHOTO_MAX_DIMENSION", "1600"))
+
+PHOTO_JPEG_QUALITY = int(os.getenv("PHOTO_JPEG_QUALITY", "82"))
+
+# How many photos one finding may carry.
+PHOTO_MAX_PER_RECORD = int(os.getenv("PHOTO_MAX_PER_RECORD", "8"))
 
 # ==========================================================
 # Manual Ingestion

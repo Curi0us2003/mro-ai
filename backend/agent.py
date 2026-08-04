@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from backend.config import (
@@ -72,6 +73,36 @@ from backend.database import (
 
 logger = logging.getLogger("mro_copilot.agent")
 logger.setLevel(LOG_LEVEL)
+
+# ==========================================================
+# Off-thread conversation logging
+# --------------------------------------------------------
+# Every turn writes the technician's utterance to CONVERSATIONS
+# before the model is called, and the reply after. Each write is a
+# round trip to HANA Cloud (~0.5s from here), and nothing in the
+# turn depends on the result - so waiting for them just delayed the
+# reply the technician is standing there waiting to hear.
+#
+# They are handed to a single background worker instead. One worker,
+# not a pool: submissions stay FIFO, so the transcript keeps its
+# order. Failures are logged rather than raised, since losing an
+# audit row must not break a live inspection.
+# ==========================================================
+
+_log_writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="convlog")
+
+
+def _log_message_async(role: str, message: str, record_id: Optional[str]) -> None:
+    """Persist one conversation turn without blocking the caller."""
+
+    def _report(future):
+        exc = future.exception()
+        if exc:
+            logger.warning("Could not persist a %s turn: %s", role, exc)
+
+    _log_writer.submit(
+        insert_conversation_message, role, message, record_id
+    ).add_done_callback(_report)
 
 # ==========================================================
 # System Prompt
@@ -240,6 +271,63 @@ def _chat_completion_stream(messages: list[dict], tools: Optional[list] = None, 
 
 
 # ==========================================================
+# Shared tool: manual knowledge search
+# --------------------------------------------------------
+# Module level because both conversational surfaces need it - the
+# technician's MaintenanceAgent and the supervisor's assistant in
+# backend.assistant - and neither should own the other's copy.
+# ==========================================================
+
+def search_maintenance_knowledge(arguments: dict) -> dict:
+    """
+    Semantic search over the ingested manuals.
+
+    Returns either {"results": [...]} or {"results": [], "note": ...}
+    where the note tells the model to admit the manuals do not cover
+    the question rather than answering from general knowledge.
+    """
+    query = arguments.get("query", "")
+    top_k = int(arguments.get("top_k", TOP_K_RESULTS))
+
+    if not query:
+        return {"error": "No query provided"}
+
+    try:
+        query_embedding = embed_query(query)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Embedding the search query failed")
+        return {"error": f"Manual search is unavailable right now: {exc}"}
+
+    results = semantic_search(
+        query_embedding,
+        top_k=top_k,
+        min_score=MIN_RELEVANCE_SCORE,
+    )
+
+    if not results:
+        return {
+            "results": [],
+            "note": (
+                "No passage in the ingested manuals is relevant to this "
+                "question. Say the manuals do not cover it rather than "
+                "answering from general knowledge."
+            ),
+        }
+
+    return {
+        "results": [
+            {
+                "source": r["FILE_NAME"],
+                "page": r.get("PAGE_NUMBER"),
+                "content": r["CONTENT"],
+                "relevance_score": round(float(r["SCORE"]), 4),
+            }
+            for r in results
+        ]
+    }
+
+
+# ==========================================================
 # Agent
 # ==========================================================
 
@@ -288,7 +376,7 @@ class MaintenanceAgent:
         Send one technician utterance to the agent and return the
         assistant's natural-language reply (ready for text-to-speech).
         """
-        insert_conversation_message("technician", technician_utterance, self.record_id)
+        _log_message_async("technician", technician_utterance, self.record_id)
         self.messages.append({"role": "user", "content": technician_utterance})
 
         for _ in range(max_tool_iterations):
@@ -299,7 +387,7 @@ class MaintenanceAgent:
             if not message.tool_calls:
                 reply = message.content or ""
                 self.messages.append({"role": "assistant", "content": reply})
-                insert_conversation_message("assistant", reply, self.record_id)
+                _log_message_async("assistant", reply, self.record_id)
                 return reply
 
             # The model wants to call one or more tools first.
@@ -359,7 +447,7 @@ class MaintenanceAgent:
         text-to-speech and to the browser as soon as it exists, instead
         of after the entire reply is ready.
         """
-        insert_conversation_message("technician", technician_utterance, self.record_id)
+        _log_message_async("technician", technician_utterance, self.record_id)
         self.messages.append({"role": "user", "content": technician_utterance})
 
         for _ in range(max_tool_iterations):
@@ -419,7 +507,7 @@ class MaintenanceAgent:
 
             reply = "".join(content_parts)
             self.messages.append({"role": "assistant", "content": reply})
-            insert_conversation_message("assistant", reply, self.record_id)
+            _log_message_async("assistant", reply, self.record_id)
             yield {"type": "done", "reply": reply}
             return
 
@@ -431,14 +519,24 @@ class MaintenanceAgent:
         insert_conversation_message("assistant", fallback, self.record_id)
         yield {"type": "done", "reply": fallback}
 
+    @staticmethod
+    def record_is_complete(record: Optional[dict]) -> bool:
+        """
+        Whether an already-fetched record has every required field.
+
+        Split out from is_record_complete() so a caller that has just
+        read the record can judge completeness without paying for a
+        second round trip to HANA for the same row.
+        """
+        if not record:
+            return False
+        return all(record.get(field.upper()) for field in REQUIRED_FIELDS)
+
     def is_record_complete(self) -> bool:
         """Check whether every required field has been captured."""
         if not self.record_id:
             return False
-        record = get_maintenance_record(self.record_id)
-        if not record:
-            return False
-        return all(record.get(field.upper()) for field in REQUIRED_FIELDS)
+        return self.record_is_complete(get_maintenance_record(self.record_id))
 
     # ------------------------------------------------------
     # Tool execution
@@ -463,45 +561,7 @@ class MaintenanceAgent:
         return {"error": f"Unknown tool '{name}'"}
 
     def _tool_search_maintenance_knowledge(self, arguments: dict) -> dict:
-        query = arguments.get("query", "")
-        top_k = int(arguments.get("top_k", TOP_K_RESULTS))
-
-        if not query:
-            return {"error": "No query provided"}
-
-        try:
-            query_embedding = embed_query(query)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Embedding the search query failed")
-            return {"error": f"Manual search is unavailable right now: {exc}"}
-
-        results = semantic_search(
-            query_embedding,
-            top_k=top_k,
-            min_score=MIN_RELEVANCE_SCORE,
-        )
-
-        if not results:
-            return {
-                "results": [],
-                "note": (
-                    "No passage in the ingested manuals is relevant to this "
-                    "question. Tell the technician the manuals do not cover it "
-                    "rather than answering from general knowledge."
-                ),
-            }
-
-        return {
-            "results": [
-                {
-                    "source": r["FILE_NAME"],
-                    "page": r.get("PAGE_NUMBER"),
-                    "content": r["CONTENT"],
-                    "relevance_score": round(float(r["SCORE"]), 4),
-                }
-                for r in results
-            ]
-        }
+        return search_maintenance_knowledge(arguments)
 
     def _tool_create_or_update_record(self, arguments: dict) -> dict:
         if arguments.get("technician") is None and self.technician:

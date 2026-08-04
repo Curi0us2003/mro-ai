@@ -53,10 +53,12 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import threading
 import uuid
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from backend.config import (
     AICORE_STT_MODEL,
@@ -188,13 +190,42 @@ def save_uploaded_audio(audio_bytes: bytes, original_file_name: str) -> Path:
     return destination
 
 
+# Archiving the upload is for auditing and replay - the transcript does
+# not depend on it, so it must not sit in front of the technician's reply.
+_archive_writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="audioarchive")
+
+
+def _persist_audio_async(audio_bytes: bytes, original_file_name: str) -> None:
+    """Archive an upload under UPLOADS_FOLDER without blocking the caller."""
+
+    def _report(future):
+        exc = future.exception()
+        if exc:
+            logger.warning("Could not archive an uploaded recording: %s", exc)
+
+    _archive_writer.submit(
+        save_uploaded_audio, audio_bytes, original_file_name
+    ).add_done_callback(_report)
+
+
 # ==========================================================
 # Provider call
 # ==========================================================
 
+_model_cache: dict[str, Any] = {}
+_model_lock = threading.Lock()
+
+
 def _build_model(system_instruction: str):
     """
-    Gemini model wired through the AI Core proxy.
+    Gemini model wired through the AI Core proxy, built once per
+    distinct system instruction and reused after that.
+
+    Constructing one resolves an AI Core proxy client - an OAuth token
+    fetch plus a deployment lookup, several seconds on a cold process -
+    so rebuilding it per recording put that cost into every single
+    voice turn. The instruction only varies by spoken language, so the
+    cache stays tiny in practice.
 
     Unlike the openai-compatible proxy used for chat/embeddings,
     google_vertexai's GenerativeModel needs a real `model_name` to build
@@ -203,13 +234,41 @@ def _build_model(system_instruction: str):
     underlying vertexai SDK with an empty model name and every call
     fails with an "Invalid request" URI-templating error.
     """
-    from gen_ai_hub.proxy.native.google_vertexai.clients import GenerativeModel
+    cached = _model_cache.get(system_instruction)
+    if cached is not None:
+        return cached
 
-    kwargs: dict = {"model_name": AICORE_STT_MODEL, "system_instruction": system_instruction}
-    if AICORE_STT_DEPLOYMENT_ID:
-        kwargs["deployment_id"] = AICORE_STT_DEPLOYMENT_ID
+    with _model_lock:
+        cached = _model_cache.get(system_instruction)
+        if cached is not None:
+            return cached
 
-    return GenerativeModel(**kwargs)
+        from gen_ai_hub.proxy.native.google_vertexai.clients import GenerativeModel
+
+        kwargs: dict = {
+            "model_name": AICORE_STT_MODEL,
+            "system_instruction": system_instruction,
+        }
+        if AICORE_STT_DEPLOYMENT_ID:
+            kwargs["deployment_id"] = AICORE_STT_DEPLOYMENT_ID
+
+        model = GenerativeModel(**kwargs)
+        _model_cache[system_instruction] = model
+        return model
+
+
+def warm_up_transcriber() -> None:
+    """
+    Build (and cache) the transcription model without sending audio.
+
+    This is where the AI Core proxy client gets resolved - an OAuth
+    token fetch plus a deployment lookup that costs several seconds
+    once per process. Calling this at startup means the first real
+    recording only pays for the transcription itself. The same proxy
+    client is shared with the chat and embedding calls, so they get
+    warmed as a side effect.
+    """
+    _build_model(TRANSCRIPTION_INSTRUCTION)
 
 
 def _transcribe_bytes(audio_bytes: bytes, mime_type: str, language: Optional[str]) -> str:
@@ -279,13 +338,16 @@ def transcribe_audio_bytes(
     to manage a temp file themselves.
 
     If `persist` is True (default), the audio is also saved under
-    UPLOADS_FOLDER for auditing/replay purposes.
+    UPLOADS_FOLDER for auditing/replay purposes - but on a background
+    thread, and transcription starts from the bytes already in memory.
+    Previously this wrote the upload to disk and then read the very
+    same bytes back before sending them, so the technician waited on
+    two file operations that the transcript never depended on.
     """
     validate_audio_format(original_file_name)
 
     if persist:
-        path = save_uploaded_audio(audio_bytes, original_file_name)
-        return transcribe_audio_file(path, language=language)
+        _persist_audio_async(audio_bytes, original_file_name)
 
     return _transcribe_bytes(
         audio_bytes,
