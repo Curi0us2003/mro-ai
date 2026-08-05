@@ -93,12 +93,13 @@ from backend.auth import (
     public_user,
     role_required,
 )
-from backend.agent import MaintenanceAgent
+from backend.agent import MaintenanceAgent, SUPERVISOR_REQUIRED_FIELDS, missing_fields
 from backend.assistant import SupervisorAssistant
 from backend.database import (
     init_db,
     list_maintenance_records,
     get_maintenance_record,
+    update_maintenance_record,
     get_record_filter_options,
     get_conversation,
     list_manuals,
@@ -127,6 +128,11 @@ from backend.text_to_speech import (
     VoiceModelNotFoundError,
 )
 from backend.pdf_service import generate_report_for_record, MaintenanceRecordNotFoundError
+from backend.sftp_service import (
+    upload_report_to_sap,
+    SapPostingNotConfiguredError,
+    SapPostingError,
+)
 
 logging.basicConfig(level=LOG_LEVEL)
 logger = logging.getLogger("mro_copilot.app")
@@ -504,15 +510,31 @@ def register_routes(app: Flask) -> None:
         Start a new inspection session.
 
         The technician is the signed-in user - the client does not
-        get to name them.
+        get to name them. Optionally resumes an existing OPEN record of
+        theirs (body: {"record_id": "..."}) instead of starting blank -
+        used to pick back up a finding they left open to log a different
+        one in between.
         """
         user = current_user()
+        body = request.get_json(silent=True) or {}
+        record_id = (body.get("record_id") or "").strip() or None
+
+        if record_id:
+            record = get_maintenance_record(record_id)
+            if not record:
+                return jsonify({"error": "That record no longer exists."}), 404
+            if record.get("TECHNICIAN_USER_ID") != user["USER_ID"]:
+                return jsonify({"error": "That record belongs to another technician."}), 403
+            if record.get("STATUS") != "OPEN":
+                return jsonify({"error": "Only an open record can be resumed."}), 409
+
         session_id = str(uuid.uuid4())
 
         SESSIONS[session_id] = MaintenanceAgent(
             technician=user.get("FULL_NAME") or user["USERNAME"],
             session_id=session_id,
             user_id=user["USER_ID"],
+            record_id=record_id,
         )
 
         logger.info("Started session %s for %s", session_id, user["USERNAME"])
@@ -520,6 +542,7 @@ def register_routes(app: Flask) -> None:
             {
                 "session_id": session_id,
                 "technician": user.get("FULL_NAME") or user["USERNAME"],
+                "record_id": record_id,
             }
         ), 201
 
@@ -553,6 +576,32 @@ def register_routes(app: Flask) -> None:
 
         SESSIONS.pop(session_id, None)
         return jsonify({"session_id": session_id, "ended": True})
+
+    @app.route("/api/sessions/<session_id>/new-record", methods=["POST"])
+    @role_required(ROLE_TECHNICIAN)
+    def start_new_finding(session_id):
+        """
+        Detach the session from its current record so the next thing the
+        technician says starts a fresh finding, without ending the session
+        itself. Blocked if the current finding is still missing a
+        mandatory field.
+        """
+        agent, error = _require_own_session(session_id)
+        if error:
+            return error
+
+        result = agent.start_new_finding()
+        if not result.get("started"):
+            return jsonify(
+                {"error": "Fill in the required fields before starting a new finding.",
+                 "missing_fields": result.get("missing_fields", [])}
+            ), 400
+
+        # Same shape as a turn's "done" payload, so the frontend can feed it
+        # straight into the same record-card renderer.
+        return jsonify(
+            {"record_id": None, "record": None, "record_complete": False}
+        )
 
     # ------------------------------------------------------
     # Conversation turns
@@ -790,6 +839,12 @@ def register_routes(app: Flask) -> None:
                 "error": "Describe the finding first, then attach a photo to it."
             }), 409
 
+        current_record = get_maintenance_record(agent.record_id)
+        if current_record and current_record.get("STATUS") != "OPEN":
+            return jsonify({
+                "error": "This finding is complete and locked - photos can no longer be attached."
+            }), 409
+
         if "photo" not in request.files:
             return jsonify({"error": "No photo was attached."}), 400
 
@@ -992,6 +1047,94 @@ def register_routes(app: Flask) -> None:
             payload["conversation"] = get_conversation(record_id)
 
         return jsonify(payload)
+
+    _EDITABLE_RECORD_FIELDS = {
+        "aircraft_reg", "component", "finding", "severity", "location", "recommended_action",
+    }
+
+    @app.route("/api/records/<record_id>", methods=["PATCH"])
+    @role_required(ROLE_SUPERVISOR)
+    def patch_record(record_id):
+        """
+        Supervisor edit / complete a record.
+
+        A supervisor may correct any content field - the technician may
+        have ended their session before filling everything in - and/or
+        mark it COMPLETE, the only status transition this route grants.
+        CLOSED is reserved for the (not yet implemented) SAP posting flow.
+        """
+        record = get_maintenance_record(record_id)
+        if not record:
+            return jsonify({"error": "That record no longer exists."}), 404
+        if record.get("STATUS") == "CLOSED":
+            return jsonify({"error": "A closed record cannot be modified."}), 409
+
+        body = request.get_json(silent=True) or {}
+        fields = {k: v for k, v in body.items() if k in _EDITABLE_RECORD_FIELDS}
+        status = body.get("status")
+
+        if status is not None and status != "COMPLETE":
+            return jsonify({"error": "status may only be set to COMPLETE here."}), 400
+
+        if status == "COMPLETE":
+            merged = {**record, **{k.upper(): v for k, v in fields.items()}}
+            missing = missing_fields(merged, SUPERVISOR_REQUIRED_FIELDS)
+            if missing:
+                return jsonify(
+                    {"error": "Fill in the required fields before marking this record complete.",
+                     "missing_fields": missing}
+                ), 400
+            fields["status"] = status
+
+        if not fields:
+            return jsonify({"error": "Nothing to update."}), 400
+
+        try:
+            update_maintenance_record(record_id, **fields)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+        updated = get_maintenance_record(record_id)
+
+        # A plain edit (no explicit "mark complete") that happens to fill
+        # every field completes the record too - same rule as the
+        # technician's live session, so a supervisor topping up the last
+        # missing field doesn't need a separate click to finish the job.
+        if status != "COMPLETE" and updated.get("STATUS") == "OPEN" and MaintenanceAgent.record_is_complete(updated):
+            update_maintenance_record(record_id, status="COMPLETE")
+            updated = get_maintenance_record(record_id)
+
+        return jsonify({"record": updated})
+
+    @app.route("/api/records/<record_id>/post-to-sap", methods=["POST"])
+    @role_required(ROLE_SUPERVISOR)
+    def post_record_to_sap(record_id):
+        """
+        Generate the record's PDF report and upload it to the Azure Blob
+        Storage container SAP picks up from. Only a COMPLETE record can be
+        posted; the record becomes CLOSED (immutable from here on) only
+        once the upload actually succeeds.
+        """
+        record = get_maintenance_record(record_id)
+        if not record:
+            return jsonify({"error": "That record no longer exists."}), 404
+        if record.get("STATUS") != "COMPLETE":
+            return jsonify({"error": "Only a completed record can be posted to SAP."}), 409
+
+        try:
+            report_path = generate_report_for_record(record_id)
+        except MaintenanceRecordNotFoundError as exc:
+            return jsonify({"error": str(exc)}), 404
+
+        try:
+            upload_report_to_sap(record_id, report_path)
+        except SapPostingNotConfiguredError as exc:
+            return jsonify({"error": str(exc)}), 501
+        except SapPostingError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        update_maintenance_record(record_id, status="CLOSED")
+        return jsonify({"record": get_maintenance_record(record_id)})
 
     # ------------------------------------------------------
     # PDF reports

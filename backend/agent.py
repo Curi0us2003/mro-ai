@@ -69,6 +69,8 @@ from backend.database import (
     update_maintenance_record,
     get_maintenance_record,
     insert_conversation_message,
+    list_record_photos,
+    record_photos_available,
 )
 
 logger = logging.getLogger("mro_copilot.agent")
@@ -135,8 +137,34 @@ Your job:
 6. Keep replies short, spoken-style, and technical-but-plain - this is read
    aloud to someone wearing gloves and possibly holding a tool, not read on
    a screen. Two or three sentences is usually right.
-7. Once every required field is captured, confirm the finding back to the
-   technician in one sentence and let them know the record has been saved.
+7. Once every required field is captured, tell the technician this finding
+   is now complete and locked - they will not be able to come back and
+   change it once they move on to a new one. If `photo_count` (from the
+   record tool's result, or from `get_current_record`) is 0, mention in
+   the same breath that no photo is attached and ask if they'd like to add
+   one now, before it locks.
+8. If the technician indicates they're done with this finding and want to
+   log a separate one (e.g. "start a new record", "log another finding",
+   "that's a separate issue", "next inspection"), and every field is already
+   captured, confirm once before calling `start_new_finding` - covering both
+   the lock and, if `photo_count` is 0, the missing photo in one natural
+   question - e.g. "This finding's complete with no photo attached -
+   want to add one, or should I go ahead and lock it in and start the next
+   inspection?" - and only call the tool once they say to move on. If some
+   fields are still missing, no confirmation is needed; just call
+   `start_new_finding`. If it reports back `missing_fields`, ask for those
+   specific fields first (aircraft registration, finding, component,
+   location are mandatory before moving on) rather than calling it again
+   immediately.
+9. If a record is already preloaded when the conversation begins (resuming
+   an existing open finding), call `get_current_record` first, greet the
+   technician, and ask only about whatever is still missing - never re-ask
+   for fields already captured.
+
+A finding completes itself the moment every field is filled - you never set
+this yourself, it happens automatically. A supervisor's role is different:
+they can complete a finding that's missing fields by filling the gaps
+themselves, which you have no part in.
 
 Never fabricate torque specs, part numbers, or procedures - only state facts
 that came from a `search_maintenance_knowledge` result.
@@ -151,6 +179,21 @@ REQUIRED_FIELDS = [
     "recommended_action",
     "technician",
 ]
+
+# Mandatory before a technician can move on to a new finding (rule: aircraft
+# reg / finding / component / location must be captured; severity and
+# recommended action may be left for the supervisor).
+TECHNICIAN_REQUIRED_FIELDS = ["aircraft_reg", "finding", "component", "location"]
+
+# Mandatory before a supervisor can mark a record COMPLETE. Recommended
+# action stays optional even at completion.
+SUPERVISOR_REQUIRED_FIELDS = TECHNICIAN_REQUIRED_FIELDS + ["severity"]
+
+
+def missing_fields(record: Optional[dict], required: list[str]) -> list[str]:
+    """Which of `required` (lowercase field names) are unfilled on `record`."""
+    record = record or {}
+    return [field for field in required if not record.get(field.upper())]
 
 # ==========================================================
 # Tool Schema (OpenAI-compatible function-calling format)
@@ -207,11 +250,6 @@ TOOLS = [
                     "location": {"type": "string", "description": "Where on the aircraft/component."},
                     "recommended_action": {"type": "string", "description": "What should be done about it."},
                     "technician": {"type": "string", "description": "Name of the technician reporting."},
-                    "status": {
-                        "type": "string",
-                        "description": "Record status.",
-                        "enum": ["OPEN", "COMPLETE", "CLOSED"],
-                    },
                 },
                 "required": [],
             },
@@ -224,6 +262,21 @@ TOOLS = [
             "description": (
                 "Retrieve the current state of the maintenance record being "
                 "built in this conversation."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_new_finding",
+            "description": (
+                "Stop adding to the current finding and start a fresh one, "
+                "because the technician wants to log a separate, unrelated "
+                "finding. Fails if the current finding is still missing a "
+                "mandatory field (aircraft registration, finding, component, "
+                "or location) - in that case ask for the missing field(s) "
+                "instead of calling this again."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -376,7 +429,12 @@ class MaintenanceAgent:
         Send one technician utterance to the agent and return the
         assistant's natural-language reply (ready for text-to-speech).
         """
-        _log_message_async("technician", technician_utterance, self.record_id)
+        # Logged once the turn is over, not here - a turn's first utterance
+        # often *creates* the record (self.record_id is still None right
+        # now), and logging immediately would permanently orphan it under
+        # RECORD_ID NULL, invisible to anyone pulling up that record's
+        # transcript later. By the time the turn ends, self.record_id
+        # reflects whatever this turn actually did.
         self.messages.append({"role": "user", "content": technician_utterance})
 
         for _ in range(max_tool_iterations):
@@ -387,6 +445,7 @@ class MaintenanceAgent:
             if not message.tool_calls:
                 reply = message.content or ""
                 self.messages.append({"role": "assistant", "content": reply})
+                _log_message_async("technician", technician_utterance, self.record_id)
                 _log_message_async("assistant", reply, self.record_id)
                 return reply
 
@@ -428,6 +487,7 @@ class MaintenanceAgent:
             "I've saved what you've told me so far - could you repeat or "
             "clarify your last point?"
         )
+        insert_conversation_message("technician", technician_utterance, self.record_id)
         insert_conversation_message("assistant", fallback, self.record_id)
         return fallback
 
@@ -447,7 +507,8 @@ class MaintenanceAgent:
         text-to-speech and to the browser as soon as it exists, instead
         of after the entire reply is ready.
         """
-        _log_message_async("technician", technician_utterance, self.record_id)
+        # See send() for why this isn't logged until the turn ends - the
+        # first utterance in a finding can create the record mid-turn.
         self.messages.append({"role": "user", "content": technician_utterance})
 
         for _ in range(max_tool_iterations):
@@ -507,6 +568,7 @@ class MaintenanceAgent:
 
             reply = "".join(content_parts)
             self.messages.append({"role": "assistant", "content": reply})
+            _log_message_async("technician", technician_utterance, self.record_id)
             _log_message_async("assistant", reply, self.record_id)
             yield {"type": "done", "reply": reply}
             return
@@ -516,6 +578,7 @@ class MaintenanceAgent:
             "I've saved what you've told me so far - could you repeat or "
             "clarify your last point?"
         )
+        insert_conversation_message("technician", technician_utterance, self.record_id)
         insert_conversation_message("assistant", fallback, self.record_id)
         yield {"type": "done", "reply": fallback}
 
@@ -557,6 +620,8 @@ class MaintenanceAgent:
             return self._tool_create_or_update_record(arguments)
         if name == "get_current_record":
             return self._tool_get_current_record()
+        if name == "start_new_finding":
+            return self.start_new_finding()
 
         return {"error": f"Unknown tool '{name}'"}
 
@@ -564,6 +629,12 @@ class MaintenanceAgent:
         return search_maintenance_knowledge(arguments)
 
     def _tool_create_or_update_record(self, arguments: dict) -> dict:
+        # Status is never technician-*chosen* - it's promoted automatically
+        # below once every field is in, or later by a supervisor filling
+        # gaps the technician left. Neither the LLM nor the SAP posting
+        # flow may set it directly through this tool.
+        arguments.pop("status", None)
+
         if arguments.get("technician") is None and self.technician:
             arguments["technician"] = self.technician
 
@@ -571,16 +642,57 @@ class MaintenanceAgent:
             self.record_id = insert_maintenance_record(
                 technician_user_id=self.user_id, **arguments
             )
-            return {"record_id": self.record_id, "created": True}
+            created = True
+        else:
+            update_maintenance_record(self.record_id, **arguments)
+            created = False
 
-        update_maintenance_record(self.record_id, **arguments)
-        return {
+        # A finding the technician has fully described - all seven fields,
+        # including the ones they weren't required to give - needs no
+        # supervisor gap-filling, so it completes itself right away rather
+        # than waiting on a review step that has nothing left to add.
+        record = get_maintenance_record(self.record_id)
+        just_completed = False
+        if record and record.get("STATUS") == "OPEN" and self.record_is_complete(record):
+            update_maintenance_record(self.record_id, status="COMPLETE")
+            just_completed = True
+
+        result = {
             "record_id": self.record_id,
-            "created": False,
-            "updated_fields": list(arguments.keys()),
+            "created": created,
+            **({} if created else {"updated_fields": list(arguments.keys())}),
         }
+        if just_completed:
+            result["status"] = "COMPLETE"
+            result["photo_count"] = (
+                len(list_record_photos(self.record_id)) if record_photos_available() else 0
+            )
+        return result
 
     def _tool_get_current_record(self) -> dict:
         if not self.record_id:
             return {"record": None}
-        return {"record": get_maintenance_record(self.record_id)}
+        photo_count = (
+            len(list_record_photos(self.record_id)) if record_photos_available() else 0
+        )
+        return {
+            "record": get_maintenance_record(self.record_id),
+            "photo_count": photo_count,
+        }
+
+    def start_new_finding(self) -> dict:
+        """
+        Detach from the current record so the next
+        create_or_update_maintenance_record call starts a fresh one.
+
+        Refuses while the current finding is missing a technician-mandatory
+        field, so a finding can never be abandoned half-identified.
+        """
+        if self.record_id:
+            record = get_maintenance_record(self.record_id)
+            missing = missing_fields(record, TECHNICIAN_REQUIRED_FIELDS)
+            if missing:
+                return {"started": False, "missing_fields": missing}
+
+        self.record_id = None
+        return {"started": True}

@@ -384,6 +384,30 @@ PDF_FONT = "Helvetica"
 PDF_TITLE = "Aircraft Maintenance Report"
 
 # ==========================================================
+# Azure Blob Storage (SAP posting)
+# ==========================================================
+# Where a COMPLETE record's PDF report is uploaded when a supervisor posts
+# it to SAP - after which the record becomes CLOSED and immutable. Same
+# storage account/container as the OnM-MRP-Data-Loading loader
+# (github.com/Curi0us2003/OnM-MRP-Data-Loading), which calls this
+# connection "SFTP" even though the transport is the Azure Blob SDK, not
+# the SFTP protocol - kept consistent with that naming here too. That
+# loader's SAS token is read-only; this one needs write permission.
+#
+# Optional at import time (unlike HANA/AI Core below): the rest of the app
+# works without it, and Post to SAP simply reports it isn't configured yet.
+
+AZURE_STORAGE_ACCOUNT_NAME = os.getenv("AZURE_STORAGE_ACCOUNT_NAME", "")
+
+AZURE_STORAGE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER", "")
+
+AZURE_STORAGE_SAS_TOKEN = os.getenv("AZURE_STORAGE_SAS_TOKEN", "")
+
+# Keeps posted PDFs separate from the MRP loader's own files in the same
+# container.
+AZURE_STORAGE_SAP_PREFIX = os.getenv("AZURE_STORAGE_SAP_PREFIX", "sap-postings/")
+
+# ==========================================================
 # Logging
 # ==========================================================
 

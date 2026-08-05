@@ -220,6 +220,17 @@
             </ul>
           </div>
         </div>
+
+        <!-- Your own past findings. Open ones can be resumed; complete
+             and closed ones are locked - see records-list.js rendering. -->
+        <div class="card card--my-records">
+          <div class="card__header-row">
+            <h2 class="card__title">Your recent findings</h2>
+          </div>
+          <div class="records-list records-list--compact" id="my-records-list">
+            <p class="records-list__empty">Loading your records…</p>
+          </div>
+        </div>
       </div>
 
       <!-- ---------- Active session: details LEFT, chat RIGHT ---------- -->
@@ -234,12 +245,16 @@
                 <span class="session-info__label">Technician</span>
                 <span class="session-info__value" id="session-technician-name">—</span>
               </div>
-              <button class="btn btn--ghost btn--small" id="btn-end-session">End session</button>
+              <div class="session-card__actions">
+                <button class="btn btn--secondary btn--small" id="btn-new-finding">Start a new finding</button>
+                <button class="btn btn--ghost btn--small" id="btn-end-session">End session</button>
+              </div>
             </div>
             <div class="session-card__live">
               <span class="live-dot" aria-hidden="true"></span>
               <span>Session active — everything you say is being recorded</span>
             </div>
+            <p class="field-error" id="new-finding-error" role="alert"></p>
           </div>
 
           <div class="card card--record">

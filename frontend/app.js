@@ -29,6 +29,9 @@
     me: () => "/api/auth/me",
     createSession: () => "/api/sessions",
     session: (id) => `/api/sessions/${id}`,
+    newRecord: (sessionId) => `/api/sessions/${sessionId}/new-record`,
+    patchRecord: (id) => `/api/records/${id}`,
+    postToSap: (id) => `/api/records/${id}/post-to-sap`,
     sendVoice: (id) => `/api/sessions/${id}/voice`,
     sendVoiceStream: (id) => `/api/sessions/${id}/voice/stream`,
     sendMessage: (id) => `/api/sessions/${id}/message`,
@@ -56,6 +59,8 @@
     user: null,
     sessionId: null,
     recordId: null,
+    // "OPEN" or "COMPLETE" for the current finding, null before one exists.
+    recordStatus: null,
     isRecording: false,
     isBusy: false,
     mediaRecorder: null,
@@ -106,6 +111,9 @@
     workspace: document.getElementById("workspace"),
     sessionTechnicianName: document.getElementById("session-technician-name"),
     btnEndSession: document.getElementById("btn-end-session"),
+    btnNewFinding: document.getElementById("btn-new-finding"),
+    newFindingError: document.getElementById("new-finding-error"),
+    myRecordsList: document.getElementById("my-records-list"),
     micBtn: document.getElementById("btn-mic"),
     voiceStatus: document.getElementById("voice-status"),
     formTextFallback: document.getElementById("form-text-fallback"),
@@ -157,9 +165,10 @@
   // ------------------------------------------------------------
 
   class ApiError extends Error {
-    constructor(message, status) {
+    constructor(message, status, payload) {
       super(message);
       this.status = status;
+      this.payload = payload;
     }
   }
 
@@ -182,7 +191,7 @@
 
     if (!response.ok) {
       const message = (payload && payload.error) || `Request failed (${response.status})`;
-      throw new ApiError(message, response.status);
+      throw new ApiError(message, response.status, payload);
     }
 
     return payload;
@@ -191,6 +200,14 @@
   function postJson(url, body) {
     return api(url, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+  }
+
+  function patchJson(url, body) {
+    return api(url, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     });
@@ -298,6 +315,7 @@
       // Whether photo attachments are available at all depends on the
       // RECORD_PHOTOS table existing; this endpoint reports it.
       loadFilterOptions();
+      loadMyRecords();
     }
   }
 
@@ -363,29 +381,72 @@
   // Technician: sessions
   // ------------------------------------------------------------
 
+  // Human-readable names for the field-level rules enforced server-side
+  // (technician-mandatory-4 before moving on, severity before completion).
+  const FIELD_LABELS = {
+    aircraft_reg: "Aircraft registration",
+    component: "Component",
+    finding: "Finding",
+    severity: "Severity",
+    location: "Location",
+    recommended_action: "Recommended action",
+  };
+
+  function describeMissingFields(fields) {
+    return (fields || []).map((f) => FIELD_LABELS[f] || f).join(", ");
+  }
+
+  /**
+   * Shared tail of "a session now exists and workspace should show it" -
+   * used both for a brand-new session and for resuming an open record.
+   */
+  async function enterWorkspace(data) {
+    state.sessionId = data.session_id;
+    state.recordId = data.record_id || null;
+
+    els.sessionTechnicianName.textContent = data.technician;
+    els.panelStart.hidden = true;
+    els.workspace.hidden = false;
+
+    clearTranscript();
+    resetRecordCard(); // also clears any previous finding's photos
+    els.newFindingError.textContent = "";
+    setVoiceStatus(IDLE_STATUS);
+    els.inputTextMessage.focus();
+
+    if (state.recordId) {
+      try {
+        const { record } = await api(API.record(state.recordId));
+        applyRecordState({ record_id: state.recordId, record });
+        await loadSessionPhotos();
+      } catch (_err) {
+        /* card stays blank until the next turn re-syncs it */
+      }
+    }
+  }
+
   async function startSession() {
     els.btnStartSession.disabled = true;
     els.startSessionError.textContent = "";
 
     try {
       const data = await postJson(API.createSession());
-      state.sessionId = data.session_id;
-      state.recordId = null;
-
-      els.sessionTechnicianName.textContent = data.technician;
-      els.panelStart.hidden = true;
-      els.workspace.hidden = false;
-
-      clearTranscript();
-      resetRecordCard();
-      state.photos = [];
-      refreshPhotoCard();
-      setVoiceStatus(IDLE_STATUS);
-      els.inputTextMessage.focus();
+      await enterWorkspace(data);
     } catch (err) {
       els.startSessionError.textContent = err.message;
     } finally {
       els.btnStartSession.disabled = false;
+    }
+  }
+
+  async function resumeRecord(recordId) {
+    els.startSessionError.textContent = "";
+
+    try {
+      const data = await postJson(API.createSession(), { record_id: recordId });
+      await enterWorkspace(data);
+    } catch (err) {
+      els.startSessionError.textContent = err.message;
     }
   }
 
@@ -403,6 +464,116 @@
     els.workspace.hidden = true;
     els.panelStart.hidden = false;
     stopPlayback();
+    loadMyRecords();
+  }
+
+  async function startNewFinding() {
+    if (!state.sessionId) return;
+
+    // A completed finding locks the moment you leave it - resuming it
+    // later is blocked server-side (only OPEN records are resumable) - so
+    // make sure that is actually what the technician wants before it happens.
+    if (state.recordStatus === "COMPLETE") {
+      if (state.photos.length === 0) {
+        const wantsPhoto = window.confirm(
+          "No photo is attached to this finding yet. Click OK to go back and " +
+          "add one, or Cancel to move on without a photo."
+        );
+        if (wantsPhoto) return;
+      }
+
+      const proceed = window.confirm(
+        "This finding is complete. Starting a new one will lock it - you " +
+        "won't be able to come back and edit it. Continue?"
+      );
+      if (!proceed) return;
+    }
+
+    els.btnNewFinding.disabled = true;
+    els.newFindingError.textContent = "";
+
+    try {
+      const data = await postJson(API.newRecord(state.sessionId));
+      applyRecordState(data); // also clears the photo card via resetRecordCard()
+      clearTranscript();
+      loadMyRecords();
+    } catch (err) {
+      const missing = err.payload && err.payload.missing_fields;
+      els.newFindingError.textContent = missing && missing.length
+        ? `Fill in first: ${describeMissingFields(missing)}.`
+        : err.message;
+    } finally {
+      els.btnNewFinding.disabled = false;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Technician: own record history
+  // --------------------------------------------------------
+  // GET /api/records is already scoped server-side to the signed-in
+  // technician's own findings - same endpoint the supervisor list uses,
+  // just rendered as a flat, non-expanding list here.
+  // ------------------------------------------------------------
+
+  async function loadMyRecords() {
+    if (!els.myRecordsList) return;
+
+    try {
+      const data = await api(API.records("limit=10"));
+      renderMyRecords(data.records || []);
+    } catch (_err) {
+      els.myRecordsList.innerHTML =
+        `<p class="records-list__empty">Couldn't load your records.</p>`;
+    }
+  }
+
+  function renderMyRecords(records) {
+    if (!records.length) {
+      els.myRecordsList.innerHTML =
+        `<p class="records-list__empty">No findings logged yet.</p>`;
+      return;
+    }
+
+    els.myRecordsList.innerHTML = "";
+
+    records.forEach((record) => {
+      const status = record.STATUS || "OPEN";
+
+      const row = document.createElement("div");
+      row.className = "my-record-row";
+
+      const main = document.createElement("div");
+      main.className = "my-record-row__main";
+      main.innerHTML = `
+        <span class="my-record-row__aircraft">${escapeHtml(record.AIRCRAFT_REG || "Unregistered")}</span>
+        <span class="my-record-row__meta">${escapeHtml(record.COMPONENT || "—")} — ${escapeHtml(record.FINDING || "No description yet")}</span>
+      `;
+
+      const right = document.createElement("div");
+      right.className = "my-record-row__right";
+
+      const pill = document.createElement("span");
+      pill.className = `status-pill status-pill--${status.toLowerCase()}`;
+      pill.textContent = status;
+      right.appendChild(pill);
+
+      if (status === "OPEN") {
+        const resumeBtn = document.createElement("button");
+        resumeBtn.type = "button";
+        resumeBtn.className = "btn btn--secondary btn--small";
+        resumeBtn.textContent = "Resume";
+        resumeBtn.addEventListener("click", () => resumeRecord(record.RECORD_ID));
+        right.appendChild(resumeBtn);
+      } else {
+        const lock = document.createElement("span");
+        lock.className = "lock-badge";
+        lock.textContent = "🔒 Locked";
+        right.appendChild(lock);
+      }
+
+      row.append(main, right);
+      els.myRecordsList.appendChild(row);
+    });
   }
 
   // ------------------------------------------------------------
@@ -834,10 +1005,17 @@
       cell.textContent = "—";
       cell.className = "is-empty";
     });
-    els.recordStatusPill.textContent = "Not started";
-    els.recordStatusPill.className = "status-pill";
+    state.recordStatus = null;
+    els.recordStatusPill.textContent = "Open";
+    els.recordStatusPill.className = "status-pill status-pill--open";
     els.btnDownloadReport.disabled = true;
     setRecordProgress(0);
+
+    // Whatever finding was showing before - by button or by voice ("start
+    // a new finding") - is gone now; its photos must not linger on screen
+    // looking like they belong to whatever comes next.
+    state.photos = [];
+    refreshPhotoCard();
   }
 
   function setRecordProgress(filledCount) {
@@ -857,22 +1035,33 @@
    * once more to judge completeness) purely to redraw this card.
    */
   function applyRecordState(turnData) {
-    const hadRecord = Boolean(state.recordId);
-    state.recordId = turnData.record_id || state.recordId;
+    // turnData always carries the session's authoritative current record_id,
+    // including back to null - e.g. right after "start a new finding", by
+    // voice or by button. Falling back to the old state.recordId here would
+    // silently keep the just-abandoned record's fields on screen.
+    state.recordId = turnData.record_id;
 
     if (!state.recordId) {
       resetRecordCard();
       return;
     }
 
-    // The agent creates the record on the first thing the technician
-    // says; that is the moment photos become attachable.
-    if (!hadRecord) refreshPhotoCard();
-
-    els.recordStatusPill.textContent = turnData.record_complete ? "Complete" : "In progress";
+    // Only two states exist from here: OPEN (still being worked - by the
+    // technician or later by a supervisor) or COMPLETE. There is no
+    // "in progress" - that was a field-count heuristic, not the record's
+    // actual status.
+    const status = (turnData.record && turnData.record.STATUS) || "OPEN";
+    const isComplete = status === "COMPLETE";
+    state.recordStatus = status;
+    els.recordStatusPill.textContent = isComplete ? "Completed" : "Open";
     els.recordStatusPill.className =
-      "status-pill " + (turnData.record_complete ? "status-pill--complete" : "status-pill--open");
+      "status-pill " + (isComplete ? "status-pill--complete" : "status-pill--open");
     els.btnDownloadReport.disabled = false;
+
+    // Not just on the first turn (record just created): a finding can also
+    // auto-complete mid-session, at which point the photo buttons must lock
+    // too, not just the fields.
+    refreshPhotoCard();
 
     if (turnData.record) fillRecordFields(turnData.record);
   }
@@ -938,7 +1127,8 @@
     els.cardPhotos.hidden = false;
 
     const count = state.photos.length;
-    const ready = Boolean(state.recordId);
+    const locked = state.recordStatus === "COMPLETE" || state.recordStatus === "CLOSED";
+    const ready = Boolean(state.recordId) && !locked;
 
     els.btnTakePhoto.disabled = !ready;
     els.btnUploadPhoto.disabled = !ready;
@@ -949,9 +1139,11 @@
     els.photoCountPill.className =
       "status-pill" + (count ? " status-pill--complete" : "");
 
-    els.photoHint.textContent = ready
-      ? "Attached photos go into the PDF report and are visible to your supervisor."
-      : "Describe the finding first — then you can attach a photo of it.";
+    els.photoHint.textContent = !state.recordId
+      ? "Describe the finding first — then you can attach a photo of it."
+      : locked
+        ? "This finding is complete and locked — photos can no longer be attached."
+        : "Attached photos go into the PDF report and are visible to your supervisor.";
 
     renderPhotoGrid();
   }
@@ -1412,11 +1604,13 @@
       ? `<span class="photo-badge">📷 ${record.PHOTO_COUNT}</span>`
       : "";
 
+    const status = record.STATUS || "OPEN";
+
     summary.innerHTML = `
       <span class="record-row__aircraft">${escapeHtml(record.AIRCRAFT_REG || "—")}</span>
       <span class="record-row__component">${escapeHtml(record.COMPONENT || "No component recorded")}</span>
       <span><span class="badge ${severityBadgeClass(record.SEVERITY)}">${escapeHtml(record.SEVERITY || "—")}</span></span>
-      <span class="record-row__meta record-row__status">${escapeHtml(record.STATUS || "—")}</span>
+      <span class="record-row__status status-pill status-pill--${status.toLowerCase()}">${escapeHtml(status)}</span>
       <span class="record-row__meta">${escapeHtml(record.TECHNICIAN || "—")}</span>
       <span class="record-row__meta">${formatDate(record.CREATED_AT)}</span>
       <span class="record-row__chevron" aria-hidden="true">▾</span>
@@ -1491,17 +1685,47 @@
     updateAssistantContext();
   }
 
+  /**
+   * Reopen a record's detail panel with fresh data after an edit changed
+   * it - e.g. its STATUS moved, which can also drop it out of the current
+   * filter set, so the list itself is reloaded rather than patched in place.
+   */
+  async function refreshRecordAfterEdit(recordId) {
+    state.openRecordId = null;
+    state.selectedRecordId = null;
+    await loadRecords();
+    await toggleRecordRow(recordId);
+  }
+
   function renderRecordDetail(container, record, conversation, photos) {
-    const fields = [
-      ["Aircraft", record.AIRCRAFT_REG],
-      ["Component", record.COMPONENT],
-      ["Location", record.LOCATION],
-      ["Severity", record.SEVERITY],
-      ["Status", record.STATUS],
-      ["Technician", record.TECHNICIAN],
-      ["Inspected", formatDate(record.INSPECTION_TS)],
-      ["Record id", record.RECORD_ID],
-    ];
+    const status = record.STATUS || "OPEN";
+    // Only an OPEN record is editable - a supervisor's fix-up window before
+    // marking it COMPLETE. COMPLETE/CLOSED render as plain read-only text.
+    const editable = status === "OPEN";
+
+    const editableRow = (label, field, value, { textarea = false } = {}) => {
+      if (!editable) {
+        return `
+          <div class="detail-item">
+            <span class="detail-item__label">${label}</span>
+            <span class="detail-item__value ${value ? "" : "is-empty"}">${escapeHtml(value || "—")}</span>
+          </div>`;
+      }
+      const control = textarea
+        ? `<textarea class="text-input text-input--block" data-field="${field}" rows="2">${escapeHtml(value || "")}</textarea>`
+        : `<input class="text-input text-input--block" data-field="${field}" value="${escapeHtml(value || "")}">`;
+      return `
+        <div class="detail-item">
+          <span class="detail-item__label">${label}</span>
+          ${control}
+        </div>`;
+    };
+
+    const staticRow = (label, value) => `
+      <div class="detail-item">
+        <span class="detail-item__label">${label}</span>
+        <span class="detail-item__value ${value ? "" : "is-empty"}">${escapeHtml(value || "—")}</span>
+      </div>`;
 
     const turns = conversation
       .map((turn) => {
@@ -1524,27 +1748,40 @@
       )
       .join("");
 
+    const sapAction = status === "CLOSED"
+      ? `<span class="status-pill status-pill--closed">Posted to SAP</span>`
+      : `<button class="btn btn--sap btn--small" data-action="post-sap"
+           ${status === "COMPLETE" ? "" : `disabled title="Mark this record complete first."`}>
+           Post to SAP
+         </button>`;
+
     container.innerHTML = `
       <div class="detail-grid">
-        ${fields
-          .map(
-            ([label, value]) => `
-          <div class="detail-item">
-            <span class="detail-item__label">${label}</span>
-            <span class="detail-item__value ${value ? "" : "is-empty"}">${escapeHtml(value || "—")}</span>
-          </div>`
-          )
-          .join("")}
+        ${editableRow("Aircraft", "AIRCRAFT_REG", record.AIRCRAFT_REG)}
+        ${editableRow("Component", "COMPONENT", record.COMPONENT)}
+        ${editableRow("Location", "LOCATION", record.LOCATION)}
+        ${editableRow("Severity", "SEVERITY", record.SEVERITY)}
+        <div class="detail-item">
+          <span class="detail-item__label">Status</span>
+          <span class="status-pill status-pill--${status.toLowerCase()}">${escapeHtml(status)}</span>
+        </div>
+        ${staticRow("Technician", record.TECHNICIAN)}
+        ${staticRow("Inspected", formatDate(record.INSPECTION_TS))}
+        ${staticRow("Record id", record.RECORD_ID)}
       </div>
 
       <div class="detail-section">
         <p class="detail-section__title">Finding</p>
-        <p class="detail-section__body">${escapeHtml(record.FINDING || "Not recorded")}</p>
+        ${editable
+          ? `<textarea class="text-input text-input--block" data-field="FINDING" rows="3">${escapeHtml(record.FINDING || "")}</textarea>`
+          : `<p class="detail-section__body">${escapeHtml(record.FINDING || "Not recorded")}</p>`}
       </div>
 
       <div class="detail-section">
         <p class="detail-section__title">Recommended action</p>
-        <p class="detail-section__body">${escapeHtml(record.RECOMMENDED_ACTION || "Not recorded")}</p>
+        ${editable
+          ? `<textarea class="text-input text-input--block" data-field="RECOMMENDED_ACTION" rows="3">${escapeHtml(record.RECOMMENDED_ACTION || "")}</textarea>`
+          : `<p class="detail-section__body">${escapeHtml(record.RECOMMENDED_ACTION || "Not recorded")}</p>`}
       </div>
 
       ${
@@ -1565,9 +1802,14 @@
           : ""
       }
 
+      <p class="field-error" data-role="edit-error"></p>
+
       <div class="detail-actions">
+        ${editable ? `<button class="btn btn--secondary btn--small" data-action="save">Save changes</button>` : ""}
+        ${editable ? `<button class="btn btn--primary btn--small" data-action="complete">Mark complete</button>` : ""}
         <button class="btn btn--primary btn--small" data-action="report">Download PDF report</button>
         <button class="btn btn--secondary btn--small" data-action="ask">Ask the assistant about this</button>
+        ${sapAction}
       </div>
     `;
 
@@ -1579,6 +1821,65 @@
       openChatbot();
       els.inputChatbot.focus();
     });
+
+    const errorEl = container.querySelector('[data-role="edit-error"]');
+
+    const sapBtn = container.querySelector('[data-action="post-sap"]');
+    if (sapBtn) {
+      sapBtn.addEventListener("click", async () => {
+        const originalLabel = sapBtn.textContent;
+        sapBtn.disabled = true;
+        sapBtn.textContent = "Posting…";
+        errorEl.textContent = "";
+        try {
+          await postJson(API.postToSap(record.RECORD_ID));
+          await refreshRecordAfterEdit(record.RECORD_ID);
+        } catch (err) {
+          errorEl.textContent = err.message;
+          sapBtn.disabled = false;
+          sapBtn.textContent = originalLabel;
+        }
+      });
+    }
+
+    if (editable) {
+      const collectFields = () => {
+        const values = {};
+        container.querySelectorAll("[data-field]").forEach((field) => {
+          values[field.dataset.field.toLowerCase()] = field.value.trim();
+        });
+        return values;
+      };
+
+      container.querySelector('[data-action="save"]').addEventListener("click", async (event) => {
+        const btn = event.currentTarget;
+        btn.disabled = true;
+        errorEl.textContent = "";
+        try {
+          await patchJson(API.patchRecord(record.RECORD_ID), collectFields());
+          await refreshRecordAfterEdit(record.RECORD_ID);
+        } catch (err) {
+          errorEl.textContent = err.message;
+          btn.disabled = false;
+        }
+      });
+
+      container.querySelector('[data-action="complete"]').addEventListener("click", async (event) => {
+        const btn = event.currentTarget;
+        btn.disabled = true;
+        errorEl.textContent = "";
+        try {
+          await patchJson(API.patchRecord(record.RECORD_ID), { ...collectFields(), status: "COMPLETE" });
+          await refreshRecordAfterEdit(record.RECORD_ID);
+        } catch (err) {
+          const missing = err.payload && err.payload.missing_fields;
+          errorEl.textContent = missing && missing.length
+            ? `Fill in first: ${describeMissingFields(missing)}.`
+            : err.message;
+          btn.disabled = false;
+        }
+      });
+    }
 
     container.querySelectorAll("[data-photo-url]").forEach((img) => {
       img.addEventListener("click", () =>
@@ -1644,6 +1945,7 @@
 
   els.btnStartSession.addEventListener("click", startSession);
   els.btnEndSession.addEventListener("click", endSession);
+  els.btnNewFinding.addEventListener("click", startNewFinding);
   els.micBtn.addEventListener("click", toggleRecording);
   els.formTextFallback.addEventListener("submit", sendText);
   els.btnDownloadReport.addEventListener("click", downloadReport);

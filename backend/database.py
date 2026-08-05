@@ -730,7 +730,15 @@ def insert_maintenance_record(
 
 
 def update_maintenance_record(record_id: str, **fields: Any) -> None:
-    """Update arbitrary columns on an existing maintenance record."""
+    """
+    Update arbitrary columns on an existing maintenance record.
+
+    Refuses outright once a record is CLOSED (posted to SAP) - this is the
+    single choke point every write path (the technician's agent, the
+    supervisor's complete/edit endpoint, and eventually SAP posting) goes
+    through, so the "nobody can touch a closed record" rule only needs to
+    live here.
+    """
     if not fields:
         return
     allowed = {
@@ -741,9 +749,17 @@ def update_maintenance_record(record_id: str, **fields: Any) -> None:
     updates = {k.upper(): v for k, v in fields.items() if k.upper() in allowed}
     if not updates:
         return
-    set_clause = ", ".join(f"{col} = ?" for col in updates)
-    params = list(updates.values()) + [record_id]
+
     with get_connection() as conn:
+        cursor = _execute(
+            conn, "SELECT STATUS FROM MAINTENANCE_RECORDS WHERE RECORD_ID = ?", (record_id,)
+        )
+        row = cursor.fetchone()
+        if row and row[0] == "CLOSED":
+            raise ValueError("Record is closed and cannot be modified")
+
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        params = list(updates.values()) + [record_id]
         _execute(
             conn,
             f"UPDATE MAINTENANCE_RECORDS SET {set_clause} WHERE RECORD_ID = ?",

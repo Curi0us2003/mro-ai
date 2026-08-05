@@ -47,3 +47,7 @@ pdfplumber==0.11.4
 
 # --- PDF report generation (backend/pdf_service.py) -------------
 reportlab==4.2.5
+
+# --- SAP posting: Azure Blob Storage upload (backend/sftp_service.py) ---
+# Same client used by the OnM-MRP-Data-Loading loader.
+azure-storage-blob>=12.19

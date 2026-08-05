@@ -46,6 +46,11 @@
   --color-error-bg: #fbe9e9;
   --color-neutral-bg: #eef0f2;
 
+  /* Status: OPEN specifically - a true yellow, distinct from the amber
+     --color-warning used for "Major" severity elsewhere. */
+  --color-open: #8a6d00;
+  --color-open-bg: #fff3cd;
+
   /* Type */
   --font-family: "Segoe UI", Arial, "Helvetica Neue", sans-serif;
 
@@ -589,6 +594,15 @@ button { font-family: inherit; }
 
 .btn--ghost:hover:not(:disabled) { background: var(--color-neutral-bg); }
 
+.btn--sap {
+  background: var(--color-success);
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(16, 126, 62, 0.3);
+}
+
+.btn--sap:hover:not(:disabled) { background: #0c6631; }
+.btn--sap:active:not(:disabled) { transform: translateY(1px); }
+
 .btn--small { padding: 6px 12px; font-size: 12px; }
 .btn--tall { padding: 12px 22px; font-size: 14px; }
 .btn--full { width: 100%; }
@@ -854,6 +868,13 @@ button { font-family: inherit; }
   gap: 12px;
 }
 
+.session-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
 .session-info { display: flex; flex-direction: column; min-width: 0; }
 
 .session-info__label {
@@ -881,6 +902,8 @@ button { font-family: inherit; }
   background: rgba(255, 255, 255, 0.14);
   color: #ffffff;
 }
+
+.session-card .field-error { color: #ff9d9d; }
 
 .session-card__live {
   display: flex;
@@ -958,8 +981,9 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 
-.status-pill--open { background: var(--color-warning-bg); color: var(--color-warning); }
+.status-pill--open { background: var(--color-open-bg); color: var(--color-open); }
 .status-pill--complete { background: var(--color-success-bg); color: var(--color-success); }
+.status-pill--closed { background: var(--color-neutral-bg); color: var(--color-text-muted); }
 
 /* --- Record fields --- */
 
@@ -1543,6 +1567,51 @@ button { font-family: inherit; }
 .record-row.is-open {
   border-color: var(--color-brand);
   box-shadow: var(--shadow-raised);
+}
+
+/* Technician's own compact list on the pre-session panel: no expansion,
+   just a summary line plus a resume action or a locked indicator. */
+.records-list--compact { gap: 6px; }
+
+.my-record-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+.my-record-row__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.my-record-row__aircraft { font-weight: 700; font-size: 13px; }
+
+.my-record-row__meta {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-record-row__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.lock-badge {
+  font-size: 11px;
+  color: var(--color-text-faint);
+  white-space: nowrap;
 }
 
 /* The clickable summary line */
