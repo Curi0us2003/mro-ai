@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Reporting Layer - PDF Maintenance Report Generation
 --------------------------------------------------------------
 
@@ -240,7 +240,7 @@ def _build_conversation_section(styles, conversation: list[dict]) -> list:
 
     role_labels = {
         "technician": "Technician",
-        "assistant": "AI Copilot",
+        "assistant": "AI Assistant",
         "system": "System",
     }
     role_styles = {

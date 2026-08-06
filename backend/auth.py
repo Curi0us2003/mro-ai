@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Authentication Layer
 --------------------------------------------------------------
 

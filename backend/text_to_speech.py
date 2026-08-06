@@ -1,12 +1,12 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Voice Processing Layer - Text-to-Speech
 --------------------------------------------------------------
 
 Purpose
 -------
-Convert the AI copilot's written replies (from backend.agent)
+Convert the AI assistant's written replies (from backend.agent)
 back into spoken audio, so a technician never has to look at a
 screen mid-inspection.
 
@@ -33,7 +33,7 @@ Read verbatim, Piper says "M S two one zero four two L three"
 as something unintelligible, and "ATA 32-41" as "ata thirty-two
 forty-one". normalise_for_speech() rewrites maintenance vocabulary
 into a form that survives synthesis. This is not cosmetic - it is
-the difference between a copilot a technician uses and one they
+the difference between a assistant a technician uses and one they
 switch off.
 
 IMPORTANT
@@ -181,7 +181,7 @@ def _spell(token: str) -> str:
 
 def normalise_for_speech(text: str) -> str:
     """
-    Rewrite a copilot reply into something Piper can read aloud
+    Rewrite a assistant reply into something Piper can read aloud
     correctly. Applied automatically by synthesize_speech().
 
     The written reply the technician sees on screen is untouched -

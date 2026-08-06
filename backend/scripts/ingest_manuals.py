@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Manual Ingestion Script
 --------------------------------------------------------------
 
@@ -30,7 +30,7 @@ Usage
 Notes
 -----
 • Chunking happens page by page, so every stored chunk keeps the
-  page it came from. That is what lets the copilot cite
+  page it came from. That is what lets the assistant cite
   "[B737_AMM.pdf, p.147]" accurately instead of approximately.
 • Manuals are skipped if their SHA-256 matches what is already
   stored, so you can re-run this over the folder safely.

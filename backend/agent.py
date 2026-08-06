@@ -1,12 +1,12 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 AI Reasoning Layer (Agent)
 --------------------------------------------------------------
 
 Purpose
 -------
-This module implements the conversational "co-pilot" that talks
+This module implements the conversational assistant that talks
 to the technician. It is powered by a chat model deployed in SAP
 AI Core (gpt-4.1 by default), reached through the Generative AI
 Hub proxy, and uses function/tool calling to:
@@ -69,6 +69,7 @@ from backend.database import (
     update_maintenance_record,
     get_maintenance_record,
     insert_conversation_message,
+    get_conversation,
     list_record_photos,
     record_photos_available,
 )
@@ -111,7 +112,7 @@ def _log_message_async(role: str, message: str, record_id: Optional[str]) -> Non
 # ==========================================================
 
 SYSTEM_PROMPT = """\
-You are the AI Maintenance Voice Copilot: a hands-free assistant that helps
+You are the AI Maintenance Voice Assistant: a hands-free assistant that helps
 aircraft maintenance technicians document inspections while they work.
 
 Your job:
@@ -137,38 +138,72 @@ Your job:
 6. Keep replies short, spoken-style, and technical-but-plain - this is read
    aloud to someone wearing gloves and possibly holding a tool, not read on
    a screen. Two or three sentences is usually right.
-7. Once every required field is captured, tell the technician this finding
-   is now complete and locked - they will not be able to come back and
-   change it once they move on to a new one. If `photo_count` (from the
-   record tool's result, or from `get_current_record`) is 0, mention in
-   the same breath that no photo is attached and ask if they'd like to add
-   one now, before it locks.
-8. If the technician indicates they're done with this finding and want to
+7. Severity is rarely stated as a level. Infer it from how the technician
+   describes what they are looking at, pick the closest of Minor, Moderate,
+   Major, Critical, AOG, and name the level you chose when you confirm the
+   finding ("logging that as Major") so they can correct you in one word.
+   Never invent a level outside that list, and never leave severity blank
+   just because they didn't use the word - but if what they said genuinely
+   doesn't imply a level, ask rather than guessing.
+8. Once every required field is captured, tell the technician this finding
+   is now complete. If `photo_count` (from the record tool's result, or
+   from `get_current_record`) is 0, mention in the same breath that no
+   photo is attached and ask if they'd like to add one. A photo can still
+   be attached after the finding completes - it only becomes impossible
+   once a supervisor posts the record to SAP - so do not tell them it is
+   their last chance.
+9. If the technician indicates they're done with this finding and want to
    log a separate one (e.g. "start a new record", "log another finding",
    "that's a separate issue", "next inspection"), and every field is already
-   captured, confirm once before calling `start_new_finding` - covering both
-   the lock and, if `photo_count` is 0, the missing photo in one natural
-   question - e.g. "This finding's complete with no photo attached -
-   want to add one, or should I go ahead and lock it in and start the next
-   inspection?" - and only call the tool once they say to move on. If some
-   fields are still missing, no confirmation is needed; just call
+   captured, confirm once before calling `start_new_finding` - and if
+   `photo_count` is 0, fold the missing photo into that same question, e.g.
+   "This finding's complete, no photo on it - want to add one before I start
+   the next inspection?" - then only call the tool once they say to move on.
+   If some fields are still missing, no confirmation is needed; just call
    `start_new_finding`. If it reports back `missing_fields`, ask for those
    specific fields first (aircraft registration, finding, component,
    location are mandatory before moving on) rather than calling it again
    immediately.
-9. If a record is already preloaded when the conversation begins (resuming
+10. If a record is already preloaded when the conversation begins (resuming
    an existing open finding), call `get_current_record` first, greet the
    technician, and ask only about whatever is still missing - never re-ask
    for fields already captured.
 
 A finding completes itself the moment every field is filled - you never set
-this yourself, it happens automatically. A supervisor's role is different:
-they can complete a finding that's missing fields by filling the gaps
-themselves, which you have no part in.
+this yourself, it happens automatically. Completing it is not a lock: a photo
+can still be attached to it and a supervisor can still correct any field.
+Only being posted to SAP makes a record immutable. A supervisor's role is
+different: they can complete a finding that's missing fields by filling the
+gaps themselves, which you have no part in.
 
 Never fabricate torque specs, part numbers, or procedures - only state facts
 that came from a `search_maintenance_knowledge` result.
 """
+
+# The severity vocabulary, in ascending order. Ordered so "worse than" and
+# "one step up from" comparisons stay meaningful, and shared with the
+# supervisor's edit dropdown through /api/records/filters so the two cannot
+# drift apart. "Moderate" is in the list because the model was already
+# recording it, and a level people reach for naturally is better admitted
+# than silently rewritten.
+SEVERITY_LEVELS = ["Minor", "Moderate", "Major", "Critical", "AOG"]
+
+# How many of a finding's earlier turns to replay into the model's context
+# when a technician reopens it. Enough to remember where the conversation
+# actually was; short enough not to crowd the window on a long finding.
+HISTORY_TURNS_ON_RESUME = 12
+
+# Spoken names for the record's fields, for the resume greeting - "recommended
+# action" reads better in a question than "recommended_action".
+FIELD_LABELS = {
+    "aircraft_reg": "aircraft registration",
+    "component": "component",
+    "finding": "the finding itself",
+    "severity": "severity",
+    "location": "location",
+    "recommended_action": "recommended action",
+    "technician": "technician",
+}
 
 REQUIRED_FIELDS = [
     "aircraft_reg",
@@ -246,7 +281,22 @@ TOOLS = [
                     "aircraft_reg": {"type": "string", "description": "Aircraft registration, e.g. VT-ABC."},
                     "component": {"type": "string", "description": "The component or system affected."},
                     "finding": {"type": "string", "description": "Description of the defect/observation."},
-                    "severity": {"type": "string", "description": "e.g. Minor, Major, Critical, AOG."},
+                    "severity": {
+                        "type": "string",
+                        "enum": SEVERITY_LEVELS,
+                        "description": (
+                            "How serious the finding is. Technicians rarely say a "
+                            "level by name - map what they actually said onto one "
+                            "of these: 'hairline', 'surface', 'keep an eye on it' "
+                            "-> Minor; 'worn but serviceable', 'wants doing at the "
+                            "next check' -> Moderate; 'needs fixing before it "
+                            "flies again' -> Major; 'deep crack', 'structural', "
+                            "'don't sign it off' -> Critical; 'grounded', "
+                            "'aircraft on ground', 'unairworthy' -> AOG. Say which "
+                            "level you picked when you confirm the finding, so the "
+                            "technician can correct you."
+                        ),
+                    },
                     "location": {"type": "string", "description": "Where on the aircraft/component."},
                     "recommended_action": {"type": "string", "description": "What should be done about it."},
                     "technician": {"type": "string", "description": "Name of the technician reporting."},
@@ -420,6 +470,100 @@ class MaintenanceAgent:
                 }
             )
 
+        if record_id:
+            self._restore_history(record_id)
+
+    def _restore_history(self, record_id: str) -> None:
+        """
+        Replay this finding's earlier turns into the message list, so a
+        technician who comes back to an open finding is genuinely continuing
+        the same conversation rather than starting a blank one that happens
+        to have some fields pre-filled.
+
+        Only the tail is replayed: the whole transcript of a long finding
+        would crowd the context for no benefit, and what matters is where
+        they left off. Tool calls are not replayed - the record itself is
+        the result of those, and it is read fresh at the start of the turn.
+        """
+        try:
+            turns = get_conversation(record_id)
+        except Exception as exc:  # noqa: BLE001 - history is a nicety, not a gate
+            logger.warning("Could not restore history for record %s: %s", record_id, exc)
+            return
+
+        if not turns:
+            return
+
+        for turn in turns[-HISTORY_TURNS_ON_RESUME:]:
+            role = "user" if turn.get("ROLE") == "technician" else "assistant"
+            message = (turn.get("MESSAGE") or "").strip()
+            if message:
+                self.messages.append({"role": role, "content": message})
+
+        logger.info(
+            "Restored %d earlier turn(s) for resumed record %s",
+            min(len(turns), HISTORY_TURNS_ON_RESUME), record_id,
+        )
+
+    def _resume_instruction(self) -> str:
+        """
+        The nudge that produces the opening turn when a finding is reopened.
+
+        Built from the record as it stands right now rather than left to the
+        model to look up, so the greeting costs one round trip instead of a
+        tool call and a second one.
+        """
+        record = get_maintenance_record(self.record_id) if self.record_id else None
+        missing = missing_fields(record, REQUIRED_FIELDS)
+
+        photo_count = 0
+        if self.record_id and record_photos_available():
+            try:
+                photo_count = len(list_record_photos(self.record_id))
+            except Exception:  # noqa: BLE001
+                photo_count = 0
+
+        summary = ", ".join(
+            f"{label}: {record.get(field.upper())}"
+            for field, label in FIELD_LABELS.items()
+            if record and record.get(field.upper())
+        ) or "nothing captured yet"
+
+        parts = [
+            "The technician has just reopened this finding to carry on with it. "
+            "This is your opening turn - they have not said anything yet.",
+            f"Captured so far - {summary}.",
+        ]
+
+        if missing:
+            wanted = ", ".join(FIELD_LABELS.get(f, f) for f in missing)
+            parts.append(
+                f"Still missing: {wanted}. Greet them in one short clause, remind "
+                "them which finding this is, then ask for ONE of the missing items "
+                "- the first in that list. Never re-ask for something already "
+                "captured."
+            )
+        else:
+            parts.append(
+                "Every field is captured. Greet them, say the finding is complete, "
+                "and ask whether they want to add anything else to it."
+            )
+
+        if photo_count == 0:
+            parts.append(
+                "No photo is attached. If nothing else is missing, offer to add "
+                "one now; otherwise leave the photo until the fields are done."
+            )
+        else:
+            parts.append(f"{photo_count} photo(s) already attached - do not ask for one.")
+
+        parts.append(
+            "Reply with speech only. Do not call any tool on this turn - nothing "
+            "new has been said yet."
+        )
+
+        return " ".join(parts)
+
     # ------------------------------------------------------
     # Public API
     # ------------------------------------------------------
@@ -510,7 +654,28 @@ class MaintenanceAgent:
         # See send() for why this isn't logged until the turn ends - the
         # first utterance in a finding can create the record mid-turn.
         self.messages.append({"role": "user", "content": technician_utterance})
+        yield from self._stream_reply(technician_utterance, max_tool_iterations)
 
+    def resume_stream(self, max_tool_iterations: int = 5):
+        """
+        The assistant's opening turn when a technician reopens a finding.
+
+        Same event shape as send_stream(), but driven by the record's own
+        state rather than by something the technician said - so it can pick
+        the conversation up ("you had VT-ABC's flap track down as a crack -
+        what recommended action do you want on it?") before they have to
+        remember where they got to. Only the reply is written to the
+        transcript; there is no technician turn to log.
+        """
+        self.messages.append({"role": "system", "content": self._resume_instruction()})
+        yield from self._stream_reply(None, max_tool_iterations)
+
+    def _stream_reply(self, technician_utterance: Optional[str], max_tool_iterations: int):
+        """
+        The streaming turn itself, shared by send_stream() and
+        resume_stream(). `technician_utterance` is None when nothing was
+        said - the turn is then logged as an assistant message only.
+        """
         for _ in range(max_tool_iterations):
             stream = _chat_completion_stream(self.messages, tools=TOOLS)
 
@@ -568,7 +733,8 @@ class MaintenanceAgent:
 
             reply = "".join(content_parts)
             self.messages.append({"role": "assistant", "content": reply})
-            _log_message_async("technician", technician_utterance, self.record_id)
+            if technician_utterance is not None:
+                _log_message_async("technician", technician_utterance, self.record_id)
             _log_message_async("assistant", reply, self.record_id)
             yield {"type": "done", "reply": reply}
             return
@@ -578,7 +744,8 @@ class MaintenanceAgent:
             "I've saved what you've told me so far - could you repeat or "
             "clarify your last point?"
         )
-        insert_conversation_message("technician", technician_utterance, self.record_id)
+        if technician_utterance is not None:
+            insert_conversation_message("technician", technician_utterance, self.record_id)
         insert_conversation_message("assistant", fallback, self.record_id)
         yield {"type": "done", "reply": fallback}
 

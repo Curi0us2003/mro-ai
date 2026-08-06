@@ -1,0 +1,13 @@
+{
+  "RecordId": "ed457b5f-4366-4a7d-b8f7-0b2a778f35d7",
+  "AircraftReg": "VT-XYZ",
+  "Component": "nose landing gear actuator",
+  "Finding": "hydraulic seepage",
+  "Severity": "Minor",
+  "Location": "actuator seal",
+  "RecommendedAction": "monitor and top up fluid",
+  "Technician": "Krishna Patel",
+  "TechnicianUserId": "4a7e4aac-02f2-4853-91f2-0280f7515927",
+  "InspectionTs": "20260805164358.7835400",
+  "CreatedAt": "20260805164358.7835440"
+}

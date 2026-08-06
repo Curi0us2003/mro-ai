@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 User Administration Script
 --------------------------------------------------------------
 
@@ -178,7 +178,7 @@ def cmd_enable(args) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Create and manage AI Maintenance Voice Copilot accounts."
+        description="Create and manage AI Maintenance Voice Assistant accounts."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

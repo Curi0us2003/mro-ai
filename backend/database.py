@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Database Module
 --------------------------------------------------------------
 
@@ -508,6 +508,50 @@ def count_users() -> int:
     return count
 
 
+def count_records_for_user(user_id: str) -> int:
+    """How many maintenance records name this account as the technician."""
+    with get_connection() as conn:
+        cursor = _execute(
+            conn,
+            "SELECT COUNT(*) FROM MAINTENANCE_RECORDS WHERE TECHNICIAN_USER_ID = ?",
+            (user_id,),
+        )
+        (count,) = cursor.fetchone()
+    return int(count)
+
+
+def delete_user(username: str) -> bool:
+    """
+    Remove an account outright. Returns False if there was no such user.
+
+    Only for accounts that were never meant to exist - a throwaway test
+    login, a typo'd username. Refuses while any record still points at
+    the account, because MAINTENANCE_RECORDS.TECHNICIAN_USER_ID is how a
+    finding is attributed and deleting the row would leave findings
+    credited to an id that resolves to nobody. For a real person who has
+    left, disable the account instead (set_user_active) - that revokes
+    access on their next request and keeps the attribution intact.
+    """
+    user = get_user_by_username(username)
+    if not user:
+        return False
+
+    owned = count_records_for_user(user["USER_ID"])
+    if owned:
+        raise ValueError(
+            f"'{username}' is credited on {owned} maintenance record(s). "
+            "Disable the account instead of deleting it, or delete those "
+            "records first."
+        )
+
+    with get_connection() as conn:
+        _execute(conn, "DELETE FROM USERS WHERE USER_ID = ?", (user["USER_ID"],))
+        conn.commit()
+
+    logger.info("Deleted user '%s'", username)
+    return True
+
+
 # ==========================================================
 # Manuals
 # ==========================================================
@@ -592,7 +636,7 @@ def insert_chunks_bulk(
 
     `chunks` is a list of dicts shaped {"page_number": int, "text": str}
     so every stored chunk keeps the page it came from - that is what
-    lets the copilot cite "[A320-AMM.pdf, p.147]" accurately.
+    lets the assistant cite "[A320-AMM.pdf, p.147]" accurately.
 
     TO_REAL_VECTOR takes a bind parameter, so this is a real
     executemany rather than thousands of interpolated statements.
@@ -766,6 +810,137 @@ def update_maintenance_record(record_id: str, **fields: Any) -> None:
             tuple(params),
         )
         conn.commit()
+
+
+def delete_maintenance_record(record_id: str) -> bool:
+    """
+    Delete a record and everything hanging off it, in one transaction.
+    Returns False if there was no such record.
+
+    Needed because a record is INSERTed the moment the technician first
+    names an aircraft and a component - so an abandoned session, a
+    mis-dictated finding, or a run of end-to-end test traffic leaves a
+    permanent half-filled OPEN row that the app itself had no way to
+    remove. The only remaining option was raw SQL against
+    MAINTENANCE_RECORDS, which deletes the row and silently leaves its
+    CONVERSATIONS turns and RECORD_PHOTOS blobs behind pointing at an id
+    that no longer resolves. HANA has no ON DELETE CASCADE here, so the
+    cascade lives in this function and every deletion goes through it.
+
+    A CLOSED record has been posted to SAP and is the audit trail - it is
+    refused here, exactly as update_maintenance_record() refuses it.
+    """
+    with get_connection() as conn:
+        cursor = _execute(
+            conn,
+            "SELECT STATUS FROM MAINTENANCE_RECORDS WHERE RECORD_ID = ?",
+            (record_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False
+        if row[0] == "CLOSED":
+            raise ValueError("Record is closed and cannot be deleted")
+
+        # Children first: if the commit never happens, nothing is orphaned.
+        if record_photos_available():
+            _execute(conn, "DELETE FROM RECORD_PHOTOS WHERE RECORD_ID = ?", (record_id,))
+        _execute(conn, "DELETE FROM CONVERSATIONS WHERE RECORD_ID = ?", (record_id,))
+        _execute(conn, "DELETE FROM MAINTENANCE_RECORDS WHERE RECORD_ID = ?", (record_id,))
+        conn.commit()
+
+    logger.info("Deleted maintenance record %s and its child rows", record_id)
+    return True
+
+
+def count_orphan_rows() -> dict:
+    """
+    How many child rows reference a record that no longer exists, plus
+    how many conversation turns were never linked to a record at all.
+
+    Dangling rows can only come from a record deleted outside
+    delete_maintenance_record() (raw SQL in HANA Database Explorer, say).
+    Unlinked turns are not damage: the agent logs a turn before the
+    record exists, and a technician who only asks the assistant a manual
+    question never creates one - so they are counted separately and are
+    not purged by default.
+    """
+    with get_connection() as conn:
+        cursor = _execute(
+            conn,
+            """
+            SELECT COUNT(*) FROM CONVERSATIONS c
+            WHERE c.RECORD_ID IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM MAINTENANCE_RECORDS m WHERE m.RECORD_ID = c.RECORD_ID
+            )
+            """,
+        )
+        (dangling_turns,) = cursor.fetchone()
+
+        cursor = _execute(
+            conn, "SELECT COUNT(*) FROM CONVERSATIONS WHERE RECORD_ID IS NULL"
+        )
+        (unlinked_turns,) = cursor.fetchone()
+
+        dangling_photos = 0
+        if record_photos_available():
+            cursor = _execute(
+                conn,
+                """
+                SELECT COUNT(*) FROM RECORD_PHOTOS p
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM MAINTENANCE_RECORDS m WHERE m.RECORD_ID = p.RECORD_ID
+                )
+                """,
+            )
+            (dangling_photos,) = cursor.fetchone()
+
+    return {
+        "dangling_conversations": int(dangling_turns),
+        "dangling_photos": int(dangling_photos),
+        "unlinked_conversations": int(unlinked_turns),
+    }
+
+
+def purge_orphan_rows(include_unlinked_conversations: bool = False) -> dict:
+    """
+    Delete child rows whose record is gone. Returns what was removed.
+
+    `include_unlinked_conversations` also clears turns with a NULL
+    RECORD_ID - manual-question chatter that belongs to no finding. Off by
+    default, since those are real history rather than breakage.
+    """
+    removed = {"dangling_conversations": 0, "dangling_photos": 0, "unlinked_conversations": 0}
+
+    with get_connection() as conn:
+        if record_photos_available():
+            cursor = _execute(
+                conn,
+                """
+                DELETE FROM RECORD_PHOTOS WHERE RECORD_ID NOT IN (
+                    SELECT RECORD_ID FROM MAINTENANCE_RECORDS
+                )
+                """,
+            )
+            removed["dangling_photos"] = cursor.rowcount
+
+        cursor = _execute(
+            conn,
+            """
+            DELETE FROM CONVERSATIONS WHERE RECORD_ID IS NOT NULL
+              AND RECORD_ID NOT IN (SELECT RECORD_ID FROM MAINTENANCE_RECORDS)
+            """,
+        )
+        removed["dangling_conversations"] = cursor.rowcount
+
+        if include_unlinked_conversations:
+            cursor = _execute(conn, "DELETE FROM CONVERSATIONS WHERE RECORD_ID IS NULL")
+            removed["unlinked_conversations"] = cursor.rowcount
+
+        conn.commit()
+
+    logger.info("Purged orphan rows: %s", removed)
+    return removed
 
 
 def get_record_filter_options(technician_user_id: Optional[str] = None) -> dict:

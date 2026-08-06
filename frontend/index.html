@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Maintenance Voice Copilot</title>
+<title>AI Maintenance Voice Assistant</title>
 <link rel="icon" href="logo.png">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -25,16 +25,42 @@
         </svg>
       </span>
       <span class="shell-bar__titles">
-        <span class="shell-bar__title">AI Maintenance Voice Copilot</span>
+        <span class="shell-bar__title">AI Maintenance Voice Assistant</span>
         <span class="shell-bar__subtitle">Hands-free inspection recording</span>
       </span>
     </div>
 
+    <!-- The avatar is the button: hovering shows the profile card, clicking
+         pins it open (so it can be read on a touch screen too). -->
     <div class="shell-bar__end" id="shell-user" hidden>
-      <span class="shell-user__meta">
-        <span class="shell-user__name" id="shell-user-name">—</span>
-        <span class="shell-user__role" id="shell-user-role">—</span>
-      </span>
+      <div class="user-menu" id="user-menu">
+        <button type="button" class="user-menu__trigger" id="btn-user-menu"
+                aria-haspopup="true" aria-expanded="false" aria-label="Your profile">
+          <span class="avatar" id="user-avatar" aria-hidden="true">—</span>
+        </button>
+
+        <div class="user-card" id="user-card" hidden role="dialog" aria-label="Your profile">
+          <div class="user-card__head">
+            <span class="avatar avatar--lg" id="user-card-avatar" aria-hidden="true">—</span>
+            <div class="user-card__ident">
+              <p class="user-card__name" id="user-card-name">—</p>
+              <p class="user-card__username" id="user-card-username">—</p>
+            </div>
+          </div>
+
+          <dl class="user-card__rows">
+            <div><dt>Role</dt><dd id="user-card-role">—</dd></div>
+            <div><dt>Signed in</dt><dd id="user-card-since">—</dd></div>
+          </dl>
+
+          <p class="user-card__note" id="user-card-note"></p>
+
+          <button class="btn btn--secondary btn--small btn--full" id="btn-sign-out-card">Sign out</button>
+        </div>
+      </div>
+
+      <!-- Also on the bar itself: signing out is a one-click job and
+           should not be hidden behind opening the profile first. -->
       <button class="btn btn--ghost btn--small btn--on-dark" id="btn-sign-out">Sign out</button>
     </div>
   </header>
@@ -61,7 +87,7 @@
             Log findings out loud.<br>Keep both hands on the aircraft.
           </h1>
           <p class="landing-visual__lede">
-            Speak what you see. The copilot asks only what's still missing,
+            Speak what you see. The assistant asks only what's still missing,
             cites the manual it read it in, and files a complete maintenance
             record before you've put the torque wrench down.
           </p>
@@ -163,7 +189,7 @@
               <span class="flow-step__num">2</span>
               <div>
                 <p class="flow-step__title">Answer one question</p>
-                <p class="flow-step__text">The copilot asks only for what's still missing — one thing at a time.</p>
+                <p class="flow-step__text">The assistant asks only for what's still missing — one thing at a time.</p>
               </div>
             </li>
             <li class="flow-step">
@@ -185,7 +211,7 @@
             </div>
             <p class="card__note">
               You don't need to give these in order, or all at once. Say what you
-              know and the copilot will chase the rest.
+              know and the assistant will chase the rest.
             </p>
             <ul class="field-chips">
               <li>Aircraft registration</li>

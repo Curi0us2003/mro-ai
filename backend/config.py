@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Configuration Module
 --------------------------------------------------------------
 
@@ -106,7 +106,7 @@ for folder in (
 # Application
 # ==========================================================
 
-APP_NAME = "AI Maintenance Voice Copilot"
+APP_NAME = "AI Maintenance Voice Assistant"
 
 APP_VERSION = "2.0.0"
 

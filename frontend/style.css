@@ -1,5 +1,5 @@
 /* ==============================================================
-   AI Maintenance Voice Copilot - Stylesheet
+   AI Maintenance Voice Assistant - Stylesheet
    --------------------------------------------------------------
    Design tokens follow the SAP Fiori / Horizon visual language:
    brand blue accents, a navy shell bar, neutral canvas gray,
@@ -86,7 +86,7 @@ body {
   font-family: var(--font-family);
   background: var(--color-canvas);
   color: var(--color-text);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 
@@ -105,7 +105,7 @@ button { font-family: inherit; }
 
 .eyebrow {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.8px;
   text-transform: uppercase;
@@ -205,7 +205,7 @@ button { font-family: inherit; }
 
 .shell-bar__title {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: 0.1px;
   white-space: nowrap;
   overflow: hidden;
@@ -213,7 +213,7 @@ button { font-family: inherit; }
 }
 
 .shell-bar__subtitle {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.62);
   white-space: nowrap;
 }
@@ -224,26 +224,147 @@ button { font-family: inherit; }
   gap: 14px;
 }
 
-.shell-user__meta {
+.shell-bar__end { gap: 10px; }
+
+/* ==============================================================
+   User menu: initials avatar + profile card
+   --------------------------------------------------------
+   Hover opens the card, click pins it - a touch screen has no
+   hover, and a card that vanishes the moment the pointer leaves
+   is unreadable with a mouse too once it holds a sign-out button.
+============================================================== */
+
+.user-menu { position: relative; }
+
+/* The avatar is the whole control - the name and role live in the card it
+   opens, and on the title attribute for a hover that doesn't need a click. */
+.user-menu__trigger {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.user-menu__trigger .avatar {
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.user-menu__trigger:hover .avatar,
+.user-menu.is-open .user-menu__trigger .avatar {
+  background: rgba(255, 255, 255, 0.34);
+  border-color: rgba(255, 255, 255, 0.75);
+}
+
+.user-menu__trigger:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.avatar--lg {
+  width: 42px;
+  height: 42px;
+  font-size: 16px;
+  background: var(--color-brand);
+}
+
+.user-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 70;
+  width: 268px;
+  padding: 15px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: 0 12px 32px rgba(15, 33, 54, 0.18);
+  animation: user-card-in 0.13s ease-out;
+}
+
+@keyframes user-card-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-card { animation: none; }
+}
+
+.user-card__head {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 11px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.shell-user__name {
-  font-size: 13px;
+.user-card__ident { min-width: 0; }
+
+.user-card__name {
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.shell-user__role {
-  font-size: 10px;
+.user-card__username {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-card__rows { margin: 0 0 12px; display: grid; gap: 7px; }
+
+.user-card__rows > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-card__rows dt {
+  font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.95);
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+.user-card__rows dd { margin: 0; font-size: 13.5px; font-weight: 500; text-align: right; }
+
+.user-card__note {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
 }
 
 /* A 265px-wide wordmark plus the title and subtitle will not fit a phone.
@@ -252,8 +373,10 @@ button { font-family: inherit; }
 @media (max-width: 720px) {
   .brand-mark.has-logo { height: 32px; max-width: 190px; padding: 3px 7px; }
   .shell-bar__subtitle { display: none; }
-  .shell-bar__title { font-size: 13px; }
+  .shell-bar__title { font-size: 14px; }
   .shell-bar { padding: 0 12px; }
+  /* The card carries its own Sign out, so the bar's copy can go. */
+  .shell-bar__end > #btn-sign-out { display: none; }
 }
 
 .btn--on-dark {
@@ -289,15 +412,25 @@ button { font-family: inherit; }
   min-height: 0;
 }
 
-/* Padded, centred views (start page, supervisor) */
+/* Padded, centred views (start page, supervisor)
+   The cap is high enough that on an ordinary laptop or desktop the
+   content simply runs to the window edges minus the padding - the
+   records table and the transcript both want the width. It only starts
+   centring on genuinely ultrawide displays, where a full-bleed line of
+   text would be unreadable. */
 #view-technician.is-active,
 #view-supervisor.is-active {
   width: 100%;
-  max-width: 1640px;
+  max-width: 2200px;
   margin: 0 auto;
-  padding: 22px 24px 24px;
+  padding: 20px 28px 26px;
   display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 720px) {
+  #view-technician.is-active,
+  #view-supervisor.is-active { padding: 16px 14px 20px; }
 }
 
 /* The landing split is full-bleed and exactly fills the viewport. */
@@ -355,7 +488,7 @@ button { font-family: inherit; }
 }
 
 .landing-visual__eyebrow {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 1.1px;
   text-transform: uppercase;
@@ -372,7 +505,7 @@ button { font-family: inherit; }
 }
 
 .landing-visual__lede {
-  font-size: 14.5px;
+  font-size: 15.5px;
   color: rgba(255, 255, 255, 0.82);
   margin: 0 0 26px;
   max-width: 52ch;
@@ -392,7 +525,7 @@ button { font-family: inherit; }
 .landing-visual__points li {
   display: flex;
   gap: 12px;
-  font-size: 13px;
+  font-size: 14px;
   color: rgba(255, 255, 255, 0.76);
   line-height: 1.5;
 }
@@ -411,7 +544,7 @@ button { font-family: inherit; }
   justify-content: center;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.12);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 /* --- Right pane --- */
@@ -440,7 +573,7 @@ button { font-family: inherit; }
 .login-card__hint {
   color: var(--color-text-muted);
   margin: 0 0 24px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .login-card__roles {
@@ -456,13 +589,13 @@ button { font-family: inherit; }
   display: flex;
   align-items: baseline;
   gap: 10px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-muted);
 }
 
 .role-chip__tag {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
@@ -474,7 +607,7 @@ button { font-family: inherit; }
 
 .login-card__footnote {
   color: var(--color-text-faint);
-  font-size: 11.5px;
+  font-size: 12.5px;
   margin: 18px 0 0;
 }
 
@@ -513,7 +646,7 @@ button { font-family: inherit; }
 
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-muted);
   margin: 0 0 6px;
@@ -523,7 +656,7 @@ button { font-family: inherit; }
 
 .field-error {
   color: var(--color-error);
-  font-size: 12px;
+  font-size: 13px;
   margin: 8px 0 0;
   min-height: 16px;
 }
@@ -537,7 +670,7 @@ button { font-family: inherit; }
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
   padding: 10px 13px;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--color-text);
   background: var(--color-surface);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -559,7 +692,7 @@ button { font-family: inherit; }
   border: none;
   border-radius: var(--radius-sm);
   padding: 10px 18px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease,
@@ -603,15 +736,27 @@ button { font-family: inherit; }
 .btn--sap:hover:not(:disabled) { background: #0c6631; }
 .btn--sap:active:not(:disabled) { transform: translateY(1px); }
 
-.btn--small { padding: 6px 12px; font-size: 12px; }
-.btn--tall { padding: 12px 22px; font-size: 14px; }
+/* Destructive, and deliberately quieter than the primary actions next to
+   it: outlined rather than filled, so discarding a finding never reads as
+   the obvious thing to click. */
+.btn--danger {
+  background: var(--color-surface);
+  color: var(--color-error);
+  border: 1px solid var(--color-error);
+}
+
+.btn--danger:hover:not(:disabled) { background: var(--color-error-bg); }
+.btn--danger:active:not(:disabled) { transform: translateY(1px); }
+
+.btn--small { padding: 6px 12px; font-size: 13px; }
+.btn--tall { padding: 12px 22px; font-size: 15px; }
 .btn--full { width: 100%; }
 
 .toggle {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-muted);
   cursor: pointer;
   user-select: none;
@@ -633,7 +778,7 @@ button { font-family: inherit; }
 }
 
 .card__title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   margin: 0;
 }
@@ -647,7 +792,7 @@ button { font-family: inherit; }
 }
 
 .card__note {
-  font-size: 12.5px;
+  font-size: 13.5px;
   color: var(--color-text-muted);
   margin: 0 0 14px;
 }
@@ -683,7 +828,7 @@ button { font-family: inherit; }
 }
 
 .start-hero__lede {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--color-text-muted);
   margin: 0 0 22px;
   max-width: 54ch;
@@ -697,7 +842,7 @@ button { font-family: inherit; }
 }
 
 .start-hero__aside {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-faint);
 }
 
@@ -723,7 +868,7 @@ button { font-family: inherit; }
   border-radius: 50%;
   background: var(--color-brand);
   color: #ffffff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
@@ -732,13 +877,13 @@ button { font-family: inherit; }
 
 .flow-step__title {
   margin: 0 0 2px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .flow-step__text {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 13.5px;
   color: var(--color-text-muted);
   line-height: 1.5;
 }
@@ -760,7 +905,7 @@ button { font-family: inherit; }
 }
 
 .field-chips li {
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 500;
   padding: 6px 12px;
   border-radius: 999px;
@@ -779,7 +924,7 @@ button { font-family: inherit; }
 }
 
 .field-chips li.is-auto span {
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
@@ -798,7 +943,7 @@ button { font-family: inherit; }
 }
 
 .tip-list li {
-  font-size: 12.5px;
+  font-size: 13.5px;
   color: var(--color-text-muted);
   line-height: 1.55;
   padding-left: 14px;
@@ -878,7 +1023,7 @@ button { font-family: inherit; }
 .session-info { display: flex; flex-direction: column; min-width: 0; }
 
 .session-info__label {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: rgba(255, 255, 255, 0.6);
@@ -912,7 +1057,7 @@ button { font-family: inherit; }
   margin-top: 12px;
   padding-top: 11px;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: rgba(255, 255, 255, 0.7);
 }
 
@@ -960,7 +1105,7 @@ button { font-family: inherit; }
 .record-progress__fill.is-complete { background: var(--color-success); }
 
 .record-progress__text {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -970,7 +1115,7 @@ button { font-family: inherit; }
 
 .status-pill {
   display: inline-block;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   padding: 3px 10px;
   border-radius: 999px;
@@ -995,7 +1140,7 @@ button { font-family: inherit; }
   gap: 12px;
   padding: 9px 0;
   border-bottom: 1px solid var(--color-border);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .record-fields__row:last-child { border-bottom: none; }
@@ -1057,7 +1202,7 @@ button { font-family: inherit; }
 
 .chat__status {
   margin: 3px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-muted);
   min-height: 17px;
 }
@@ -1105,20 +1250,78 @@ button { font-family: inherit; }
 
 .chat__empty-title {
   margin: 0 0 5px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--color-text);
 }
 
-.chat__empty-text { margin: 0; font-size: 12.5px; line-height: 1.55; }
+.chat__empty-text { margin: 0; font-size: 13.5px; line-height: 1.55; }
 
 /* --- Turns --- */
+
+/* ==============================================================
+   Chat rows: a bubble with its avatar beside it
+   --------------------------------------------------------
+   The avatar hangs outside the bubble and sits on its bottom
+   edge, so a run of consecutive turns reads as a conversation
+   between two faces rather than as a stack of blocks.
+============================================================== */
+
+.chat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  width: 100%;
+}
+
+.chat-row--technician { justify-content: flex-end; }
+.chat-row--assistant,
+.chat-row--error { justify-content: flex-start; }
+
+.chat-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 2px;
+  border-radius: 50%;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.chat-avatar--technician {
+  background: var(--color-brand);
+  color: #ffffff;
+}
+
+.chat-avatar--assistant {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 1px 2px rgba(20, 40, 60, 0.06);
+}
+
+.chat-avatar--error {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid #f0cccc;
+}
+
+/* An emoji face wants to sit a little larger than two initials, and must
+   not inherit the uppercase/letter-spacing meant for text. */
+.chat-avatar--emoji {
+  font-size: 16px;
+  letter-spacing: normal;
+}
 
 .transcript-turn {
   max-width: 78%;
   padding: 10px 14px;
   border-radius: var(--radius);
-  font-size: 13.5px;
+  font-size: 14.5px;
   line-height: 1.5;
   box-shadow: 0 1px 1px rgba(20, 40, 60, 0.04);
   animation: turn-in 0.18s ease-out;
@@ -1160,7 +1363,7 @@ button { font-family: inherit; }
 
 .transcript-turn__label {
   display: block;
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
@@ -1187,7 +1390,7 @@ button { font-family: inherit; }
 .transcript-turn__speaking {
   display: none;
   margin-left: 6px;
-  font-size: 11px;
+  font-size: 12px;
   vertical-align: 1px;
 }
 
@@ -1198,8 +1401,11 @@ button { font-family: inherit; }
 
 /* --- Typing indicator --- */
 
+/* Indented to line up with the assistant's bubbles rather than with its
+   avatar - the dots are that reply arriving, so they belong in its column. */
 .typing {
   align-self: flex-start;
+  margin-left: 39px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1237,7 +1443,7 @@ button { font-family: inherit; }
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface);
   color: var(--color-text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   padding: 7px 14px;
   border-radius: 999px;
@@ -1371,7 +1577,7 @@ button { font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
   background: var(--color-surface-sunken);
@@ -1387,7 +1593,7 @@ button { font-family: inherit; }
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.62);
   color: #ffffff;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -1423,7 +1629,7 @@ button { font-family: inherit; }
   left: 50%;
   transform: translateX(-50%);
   color: rgba(255, 255, 255, 0.85);
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
   max-width: 80%;
 }
@@ -1439,7 +1645,7 @@ button { font-family: inherit; }
 }
 
 .records-count {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -1466,7 +1672,7 @@ button { font-family: inherit; }
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 13px;
+  font-size: 14px;
   opacity: 0.5;
   pointer-events: none;
 }
@@ -1492,7 +1698,7 @@ button { font-family: inherit; }
 }
 
 .filter-field__label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -1502,7 +1708,7 @@ button { font-family: inherit; }
 .select {
   appearance: none;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
@@ -1551,7 +1757,7 @@ button { font-family: inherit; }
   padding: 40px 24px;
   text-align: center;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   margin: 0;
 }
 
@@ -1591,10 +1797,10 @@ button { font-family: inherit; }
   gap: 2px;
 }
 
-.my-record-row__aircraft { font-weight: 700; font-size: 13px; }
+.my-record-row__aircraft { font-weight: 700; font-size: 14px; }
 
 .my-record-row__meta {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1609,7 +1815,7 @@ button { font-family: inherit; }
 }
 
 .lock-badge {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-faint);
   white-space: nowrap;
 }
@@ -1617,7 +1823,9 @@ button { font-family: inherit; }
 /* The clickable summary line */
 .record-row__summary {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) 92px 96px 130px 116px 26px;
+  /* Widened to match the larger type - a registration, a severity badge and
+     a formatted date all need a little more room at 14px than at 13px. */
+  grid-template-columns: 104px minmax(0, 1fr) 100px 104px 140px 132px 26px;
   gap: 14px;
   align-items: center;
   width: 100%;
@@ -1627,7 +1835,7 @@ button { font-family: inherit; }
   text-align: left;
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
 }
 
@@ -1645,7 +1853,7 @@ button { font-family: inherit; }
 }
 
 .record-row__meta {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1654,7 +1862,7 @@ button { font-family: inherit; }
 
 .record-row__chevron {
   justify-self: end;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-faint);
   transition: transform 0.2s ease;
 }
@@ -1665,7 +1873,7 @@ button { font-family: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
   background: var(--color-neutral-bg);
@@ -1695,7 +1903,9 @@ button { font-family: inherit; }
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  /* 160px rather than 180px so all eight fields - record id counting
+     double - still land on one row on a laptop. */
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px 20px;
   margin-bottom: 18px;
 }
@@ -1708,16 +1918,163 @@ button { font-family: inherit; }
 }
 
 .detail-item__label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--color-text-faint);
 }
 
-.detail-item__value { font-size: 13px; font-weight: 500; word-break: break-word; }
+.detail-item__value { font-size: 14px; font-weight: 500; word-break: break-word; }
 
 .detail-item__value.is-empty { color: var(--color-border-strong); font-weight: 400; }
+
+/* Record id sits in the same row as every other field. A 36-character
+   UUID needs roughly twice the width of a one-word value, so it takes two
+   of the grid's columns rather than wrapping onto a second line - and if
+   the row does run out of room it scrolls inside its own cell instead of
+   pushing the whole grid taller. */
+.detail-item--wide { grid-column: span 2; }
+
+.detail-item--wide .detail-item__value {
+  font-family: var(--font-mono, ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow-x: auto;
+  word-break: normal;
+}
+
+/* Severity: a badge with its own "Change" affordance, rather than a field
+   in the edit form - so it is reachable on a COMPLETE finding too. */
+.detail-item__value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.link-btn {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-brand);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-btn:hover { color: var(--color-brand-dark); }
+
+/* --- Modal (severity picker) --- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 33, 54, 0.45);
+  animation: modal-in 0.12s ease-out;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal { animation: none; }
+}
+
+.modal__card {
+  width: 100%;
+  max-width: 340px;
+  padding: 18px;
+  background: var(--color-surface);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: 0 18px 48px rgba(15, 33, 54, 0.28);
+}
+
+.modal__head { margin-bottom: 14px; }
+
+.modal__title { margin: 0; font-size: 16px; font-weight: 600; }
+
+.modal__subtitle {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.modal__actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.severity-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.severity-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.severity-choice:hover:not(:disabled) {
+  background: var(--color-brand-softer);
+  border-color: var(--color-brand);
+}
+
+.severity-choice:disabled { opacity: 0.5; cursor: progress; }
+
+.severity-choice.is-current {
+  border-color: var(--color-brand);
+  background: var(--color-brand-softer);
+}
+
+.severity-choice__tick { color: var(--color-brand); font-weight: 700; }
+
+/* --- Detail body: written record left, transcript right --- */
+
+.detail-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.detail-columns__main,
+.detail-columns__aside { min-width: 0; }
+
+.detail-columns__main .detail-section:last-child,
+.detail-columns__aside .detail-section:last-child { margin-bottom: 0; }
+
+/* The transcript matches the height of the fields beside it rather than
+   being clipped to a stub - it is the evidence behind the record, so a
+   supervisor should be able to read a run of it without scrolling twice. */
+.detail-section--transcript { display: flex; flex-direction: column; }
+
+.detail-section--transcript .record-detail__conversation { max-height: 420px; }
+
+.detail-section__body.is-empty { color: var(--color-text-faint); }
+
+/* One column on anything narrower than a laptop - side by side below this
+   leaves both halves too cramped to read. */
+@media (max-width: 1100px) {
+  .detail-columns { grid-template-columns: minmax(0, 1fr); }
+  .detail-section--transcript .record-detail__conversation { max-height: 300px; }
+}
 
 .detail-section {
   margin-bottom: 16px;
@@ -1728,7 +2085,7 @@ button { font-family: inherit; }
 }
 
 .detail-section__title {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -1736,7 +2093,7 @@ button { font-family: inherit; }
   margin: 0 0 7px;
 }
 
-.detail-section__body { margin: 0; font-size: 13px; line-height: 1.6; }
+.detail-section__body { margin: 0; font-size: 14px; line-height: 1.6; }
 
 .detail-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
@@ -1744,7 +2101,7 @@ button { font-family: inherit; }
   /* The summary grid cannot hold six columns on a phone: keep the
      identity and the severity, drop the rest into the detail panel. */
   .record-row__summary {
-    grid-template-columns: minmax(0, 1fr) 92px 26px;
+    grid-template-columns: minmax(0, 1fr) 100px 26px;
     gap: 10px;
   }
   .record-row__summary .record-row__meta,
@@ -1753,7 +2110,7 @@ button { font-family: inherit; }
 
 .badge {
   display: inline-block;
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 700;
   padding: 2px 9px;
   border-radius: 999px;
@@ -1873,12 +2230,12 @@ button { font-family: inherit; }
 
 .chatbot__heading { min-width: 0; }
 
-.chatbot__title { margin: 0; font-size: 14px; font-weight: 600; }
+.chatbot__title { margin: 0; font-size: 15px; font-weight: 600; }
 
 /* Shows which finding the assistant is currently talking about. */
 .chatbot__context {
   margin: 2px 0 0;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: rgba(255, 255, 255, 0.66);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1896,7 +2253,7 @@ button { font-family: inherit; }
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -1922,7 +2279,7 @@ button { font-family: inherit; }
   max-width: 88%;
   padding: 9px 13px;
   border-radius: var(--radius);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.55;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -1957,7 +2314,7 @@ button { font-family: inherit; }
 /* Cited manual sources stand out from the prose around them. */
 .chat-msg--bot .cite {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   background: var(--color-brand-soft);
   color: var(--color-brand-darker);
   padding: 1px 5px;
@@ -1982,7 +2339,7 @@ button { font-family: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--color-brand-dark);
   background: var(--color-brand-soft);
@@ -2001,14 +2358,14 @@ button { font-family: inherit; }
 .chatbot__empty {
   margin: auto 0;
   color: var(--color-text-muted);
-  font-size: 12.5px;
+  font-size: 13.5px;
   line-height: 1.6;
 }
 
 .chatbot__empty strong {
   display: block;
   color: var(--color-text);
-  font-size: 13.5px;
+  font-size: 14.5px;
   margin-bottom: 6px;
 }
 
@@ -2022,7 +2379,7 @@ button { font-family: inherit; }
 .chatbot__suggestion {
   text-align: left;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-brand-dark);
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
@@ -2071,5 +2428,37 @@ button { font-family: inherit; }
   padding: 12px;
 }
 
-.record-detail__conversation .transcript-turn { max-width: 100%; }
+/* The review transcript is a narrower column than the live chat, so the
+   avatars shrink and the bubbles claim everything the avatar leaves. */
+.record-detail__conversation .transcript-turn { max-width: calc(100% - 35px); }
+
+.record-detail__conversation .chat-avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 10.5px;
+}
+
+.record-detail__conversation .chat-avatar--emoji { font-size: 14px; }
+
+/* Marks where a reopened finding's earlier turns end and this sitting
+   begins - without it the replayed history reads as if it just happened. */
+.transcript-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+.transcript-divider::before,
+.transcript-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
 

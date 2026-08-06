@@ -1,0 +1,13 @@
+{
+  "RecordId": "7f9c9f56-ba78-4510-9295-7bce819409a0",
+  "AircraftReg": "N123AB",
+  "Component": "Fuel supply hose",
+  "Finding": "Chafing against engine support bracket. Outer protective sleeve worn through exposing reinforcement layer.",
+  "Severity": "Major",
+  "Location": "Fuel hose chafing against the engine support bracket",
+  "RecommendedAction": "Replace hose and secure routing.",
+  "Technician": "Rahul Roy",
+  "TechnicianUserId": "4bbcd661-5c1b-4240-8e31-956acd46a31c",
+  "InspectionTs": "20260804104618.8517470",
+  "CreatedAt": "20260804104618.8517520"
+}

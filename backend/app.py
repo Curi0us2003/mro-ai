@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Flask Application Entry Point
 --------------------------------------------------------------
 
@@ -93,13 +93,19 @@ from backend.auth import (
     public_user,
     role_required,
 )
-from backend.agent import MaintenanceAgent, SUPERVISOR_REQUIRED_FIELDS, missing_fields
+from backend.agent import (
+    MaintenanceAgent,
+    SEVERITY_LEVELS,
+    SUPERVISOR_REQUIRED_FIELDS,
+    missing_fields,
+)
 from backend.assistant import SupervisorAssistant
 from backend.database import (
     init_db,
     list_maintenance_records,
     get_maintenance_record,
     update_maintenance_record,
+    delete_maintenance_record,
     get_record_filter_options,
     get_conversation,
     list_manuals,
@@ -208,7 +214,7 @@ def _require_own_session(session_id: str):
 # and sent to the browser as soon as it's ready. The browser
 # plays clips back to back as they arrive, so audio starts after
 # the first sentence instead of after the entire reply - both
-# faster and closer to "the copilot is speaking as it thinks".
+# faster and closer to "the assistant is speaking as it thinks".
 # ==========================================================
 
 _SENTENCE_BOUNDARY = re.compile(r"[.!?]\s+")
@@ -267,7 +273,12 @@ def _sentence_audio_event(sentence: str) -> dict:
 _tts_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts")
 
 
-def _stream_turn(agent: MaintenanceAgent, technician_utterance: str, transcript: Optional[str] = None):
+def _stream_turn(
+    agent: MaintenanceAgent,
+    technician_utterance: Optional[str] = None,
+    transcript: Optional[str] = None,
+    opening: bool = False,
+):
     """
     Generator of NDJSON-encoded lines for a Flask streaming Response.
     One JSON object per line:
@@ -303,7 +314,11 @@ def _stream_turn(agent: MaintenanceAgent, technician_utterance: str, transcript:
         while pending and pending[0].done():
             yield _ndjson_line(pending.popleft().result())
 
-    for event in agent.send_stream(technician_utterance):
+    events = (
+        agent.resume_stream() if opening else agent.send_stream(technician_utterance)
+    )
+
+    for event in events:
         if event["type"] == "content":
             delta = event["text"]
             full_reply += delta
@@ -746,6 +761,30 @@ def register_routes(app: Flask) -> None:
             mimetype="application/x-ndjson",
         )
 
+    @app.route("/api/sessions/<session_id>/opening/stream", methods=["POST"])
+    @role_required(ROLE_TECHNICIAN)
+    def send_opening_stream(session_id):
+        """
+        The assistant speaks first, when a technician resumes an open finding.
+
+        Without this, reopening a half-finished finding dropped them into a
+        blank conversation and left them to remember what was still missing.
+        Now the assistant picks the thread back up - "you had the flap track
+        down as cracked; what recommended action do you want on it?" - using
+        the record's own state plus the tail of the earlier transcript.
+
+        Only meaningful for a resumed session; a fresh one has no finding to
+        pick up yet.
+        """
+        agent, error = _require_own_session(session_id)
+        if error:
+            return error
+
+        if not agent.record_id:
+            return jsonify({"error": "This session has no finding to resume."}), 409
+
+        return Response(_stream_turn(agent, opening=True), mimetype="application/x-ndjson")
+
     @app.route("/api/sessions/<session_id>/speak", methods=["POST"])
     @role_required(ROLE_TECHNICIAN)
     def speak_text(session_id):
@@ -839,10 +878,14 @@ def register_routes(app: Flask) -> None:
                 "error": "Describe the finding first, then attach a photo to it."
             }), 409
 
+        # Only a CLOSED record refuses evidence. A finding completes itself
+        # the moment the last field lands, which is exactly when the assistant
+        # says "no photo attached - want to add one?" - refusing COMPLETE
+        # here made that offer impossible to accept.
         current_record = get_maintenance_record(agent.record_id)
-        if current_record and current_record.get("STATUS") != "OPEN":
+        if current_record and current_record.get("STATUS") == "CLOSED":
             return jsonify({
-                "error": "This finding is complete and locked - photos can no longer be attached."
+                "error": "This finding has been posted to SAP - photos can no longer be attached."
             }), 409
 
         if "photo" not in request.files:
@@ -1022,6 +1065,10 @@ def register_routes(app: Flask) -> None:
             "status": options.get("STATUS", []),
             "technician": options.get("TECHNICIAN", []),
             "photos_enabled": record_photos_available(),
+            # The vocabulary the assistant is constrained to, not just the
+            # values already in the table - so a supervisor's edit dropdown
+            # offers every level even before one has been used.
+            "severity_levels": SEVERITY_LEVELS,
         })
 
     @app.route("/api/records/<record_id>", methods=["GET"])
@@ -1105,6 +1152,32 @@ def register_routes(app: Flask) -> None:
             updated = get_maintenance_record(record_id)
 
         return jsonify({"record": updated})
+
+    @app.route("/api/records/<record_id>", methods=["DELETE"])
+    @role_required(ROLE_SUPERVISOR)
+    def discard_record(record_id):
+        """
+        Discard a record that should never have been filed - an abandoned
+        session, a mis-dictated finding, a row left behind by test traffic.
+
+        Supervisor-only, and never for a CLOSED record: that one has been
+        posted to SAP and is the audit trail. The record's transcript and
+        photos go with it (see delete_maintenance_record), so nothing is
+        left pointing at an id that no longer resolves.
+        """
+        try:
+            deleted = delete_maintenance_record(record_id)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+        if not deleted:
+            return jsonify({"error": "That record no longer exists."}), 404
+
+        logger.info(
+            "Supervisor %s discarded record %s",
+            current_user()["USERNAME"], record_id,
+        )
+        return jsonify({"deleted": True, "record_id": record_id})
 
     @app.route("/api/records/<record_id>/post-to-sap", methods=["POST"])
     @role_required(ROLE_SUPERVISOR)

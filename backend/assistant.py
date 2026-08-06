@@ -1,6 +1,6 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Supervisor Assistant
 --------------------------------------------------------------
 
@@ -60,7 +60,7 @@ logger.setLevel(LOG_LEVEL)
 
 
 SUPERVISOR_SYSTEM_PROMPT = """\
-You are the maintenance copilot assisting a MAINTENANCE SUPERVISOR who is
+You are the maintenance assistant assisting a MAINTENANCE SUPERVISOR who is
 reviewing findings logged by technicians.
 
 Who you are talking to:

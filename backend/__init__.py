@@ -1,11 +1,11 @@
 """
 ==============================================================
-AI Maintenance Voice Copilot
+AI Maintenance Voice Assistant
 Backend Package
 --------------------------------------------------------------
 
 This package contains the full backend implementation of the
-AI Maintenance Voice Copilot:
+AI Maintenance Voice Assistant:
 
     config.py           Central configuration (env vars, folders, constants)
     database.py         SAP HANA Cloud connection + queries

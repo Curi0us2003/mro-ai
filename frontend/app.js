@@ -1,5 +1,5 @@
 /* ==============================================================
-   AI Maintenance Voice Copilot - Frontend Logic
+   AI Maintenance Voice Assistant - Frontend Logic
    --------------------------------------------------------------
    Talks to the Flask API defined in backend/app.py. All requests
    are same-origin relative paths, since Flask serves this file
@@ -31,11 +31,13 @@
     session: (id) => `/api/sessions/${id}`,
     newRecord: (sessionId) => `/api/sessions/${sessionId}/new-record`,
     patchRecord: (id) => `/api/records/${id}`,
+    deleteRecord: (id) => `/api/records/${id}`,
     postToSap: (id) => `/api/records/${id}/post-to-sap`,
     sendVoice: (id) => `/api/sessions/${id}/voice`,
     sendVoiceStream: (id) => `/api/sessions/${id}/voice/stream`,
     sendMessage: (id) => `/api/sessions/${id}/message`,
     sendMessageStream: (id) => `/api/sessions/${id}/message/stream`,
+    openingStream: (id) => `/api/sessions/${id}/opening/stream`,
     speak: (id) => `/api/sessions/${id}/speak`,
     records: (params) => `/api/records${params ? `?${params}` : ""}`,
     record: (id) => `/api/records/${id}`,
@@ -76,6 +78,13 @@
     records: [],
     openRecordId: null,
     assistantBusy: false,
+    // Profile card clicked open, so it survives the pointer leaving.
+    userMenuPinned: false,
+
+    // The severity vocabulary, served by /api/records/filters so the
+    // supervisor's dropdown and the assistant's tool schema cannot drift
+    // apart. Seeded with the canonical list in case that call fails.
+    severityLevels: ["Minor", "Moderate", "Major", "Critical", "AOG"],
   };
 
   // ------------------------------------------------------------
@@ -87,9 +96,18 @@
     brandLogo: document.getElementById("brand-logo"),
     landingImage: document.getElementById("landing-image"),
     shellUser: document.getElementById("shell-user"),
-    shellUserName: document.getElementById("shell-user-name"),
-    shellUserRole: document.getElementById("shell-user-role"),
     btnSignOut: document.getElementById("btn-sign-out"),
+    btnSignOutCard: document.getElementById("btn-sign-out-card"),
+    userMenu: document.getElementById("user-menu"),
+    btnUserMenu: document.getElementById("btn-user-menu"),
+    userAvatar: document.getElementById("user-avatar"),
+    userCard: document.getElementById("user-card"),
+    userCardAvatar: document.getElementById("user-card-avatar"),
+    userCardName: document.getElementById("user-card-name"),
+    userCardUsername: document.getElementById("user-card-username"),
+    userCardRole: document.getElementById("user-card-role"),
+    userCardSince: document.getElementById("user-card-since"),
+    userCardNote: document.getElementById("user-card-note"),
 
     // views
     viewLogin: document.getElementById("view-login"),
@@ -266,8 +284,9 @@
     // the previous user's name in the DOM, ready to flash on the next
     // sign-in before the new one is fetched.
     els.shellUser.hidden = true;
-    els.shellUserName.textContent = "—";
-    els.shellUserRole.textContent = "—";
+    els.userAvatar.textContent = "—";
+    els.btnUserMenu.removeAttribute("title");
+    closeUserMenu();
 
     // Nothing from the last session should outlive it.
     stopPlayback();
@@ -293,15 +312,15 @@
   function showForRole(user) {
     state.user = user;
 
-    els.shellUserName.textContent = user.full_name;
-    els.shellUserRole.textContent =
-      user.role === ROLE_SUPERVISOR ? "Supervisor" : "Technician";
+    const roleLabel = user.role === ROLE_SUPERVISOR ? "Supervisor" : "Technician";
+
     els.shellUser.hidden = false;
+    fillUserCard(user, roleLabel);
 
     if (user.role === ROLE_SUPERVISOR) {
       showView(els.viewSupervisor);
       // The assistant is a supervisor tool; technicians have the voice
-      // copilot in their workspace instead.
+      // assistant in their workspace instead.
       els.chatbot.hidden = false;
       loadFilterOptions().then(loadRecords);
     } else {
@@ -317,6 +336,85 @@
       loadFilterOptions();
       loadMyRecords();
     }
+  }
+
+  // ------------------------------------------------------------
+  // Shell bar: initials avatar and profile card
+  // --------------------------------------------------------
+  // Hover opens it, click pins it. Hover alone is unusable on a touch
+  // screen and awkward with a mouse once the card holds a button;
+  // click alone hides the profile behind an interaction nobody tries.
+  // ------------------------------------------------------------
+
+  /** "Rahul Roy" -> "RR", "krishna" -> "KR". Never more than two letters. */
+  function initialsOf(name) {
+    const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return "?";
+    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+    return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  }
+
+  function fillUserCard(user, roleLabel) {
+    const initials = initialsOf(user.full_name || user.username);
+
+    els.userAvatar.textContent = initials;
+    els.userCardAvatar.textContent = initials;
+    // The bar shows initials only, so the full identity has to be reachable
+    // without opening anything - including for a screen reader.
+    els.btnUserMenu.title = `${user.full_name || user.username} · ${roleLabel}`;
+    els.btnUserMenu.setAttribute(
+      "aria-label",
+      `Your profile — ${user.full_name || user.username}, ${roleLabel}`
+    );
+    els.userCardName.textContent = user.full_name || user.username;
+    els.userCardUsername.textContent = `@${user.username}`;
+    els.userCardRole.textContent = roleLabel;
+    els.userCardSince.textContent = new Date().toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    els.userCardNote.textContent =
+      user.role === ROLE_SUPERVISOR
+        ? "You can review, correct and post every technician's findings."
+        : "Findings you log are attributed to you automatically.";
+  }
+
+  function openUserMenu() {
+    els.userCard.hidden = false;
+    els.userMenu.classList.add("is-open");
+    els.btnUserMenu.setAttribute("aria-expanded", "true");
+  }
+
+  function closeUserMenu() {
+    // Called during sign-out teardown too, which runs before the first
+    // paint on a cold load - so tolerate the elements not being wired yet.
+    if (!els.userCard) return;
+    els.userCard.hidden = true;
+    els.userMenu.classList.remove("is-open");
+    els.btnUserMenu.setAttribute("aria-expanded", "false");
+    state.userMenuPinned = false;
+  }
+
+  function wireUserMenu() {
+    els.btnUserMenu.addEventListener("click", (event) => {
+      event.stopPropagation();
+      state.userMenuPinned = !state.userMenuPinned;
+      if (state.userMenuPinned) openUserMenu();
+      else closeUserMenu();
+    });
+
+    els.userMenu.addEventListener("mouseenter", openUserMenu);
+    els.userMenu.addEventListener("mouseleave", () => {
+      if (!state.userMenuPinned) closeUserMenu();
+    });
+
+    // Clicking inside the card (e.g. selecting text) must not close it.
+    els.userCard.addEventListener("click", (event) => event.stopPropagation());
+
+    document.addEventListener("click", () => closeUserMenu());
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeUserMenu();
+    });
   }
 
   // ------------------------------------------------------------
@@ -416,12 +514,57 @@
 
     if (state.recordId) {
       try {
-        const { record } = await api(API.record(state.recordId));
+        const { record, conversation } = await api(API.record(state.recordId));
         applyRecordState({ record_id: state.recordId, record });
+        replayConversation(conversation || []);
         await loadSessionPhotos();
       } catch (_err) {
         /* card stays blank until the next turn re-syncs it */
       }
+
+      // Resuming: the assistant speaks first, picking the finding back up and
+      // asking for whatever is still outstanding. Otherwise the technician
+      // lands in an empty conversation and has to remember where they got to.
+      await playOpeningTurn();
+    }
+  }
+
+  /**
+   * Put the finding's earlier turns back on screen when it is reopened, so
+   * the technician can see what was already said instead of an empty pane
+   * under a half-filled record card. Marked off with a divider - these are
+   * from the previous sitting, not this one.
+   */
+  function replayConversation(turns) {
+    if (!turns.length) return;
+
+    turns.forEach((turn) => {
+      const role = turn.ROLE === "technician" ? "technician" : "assistant";
+      appendTurn(role, turn.MESSAGE || "");
+    });
+
+
+    const divider = document.createElement("p");
+    divider.className = "transcript-divider";
+    divider.textContent = "Picking up from here";
+    els.transcript.appendChild(divider);
+    keepPinned();
+  }
+
+  /**
+   * Let the assistant open the conversation on a resumed finding. Best-effort:
+   * if it fails, the session is still perfectly usable by speaking first.
+   */
+  async function playOpeningTurn() {
+    setBusy(true, "Picking up where you left off…");
+    showTyping();
+
+    try {
+      await streamAgentReply(API.openingStream(state.sessionId), { method: "POST" });
+    } catch (_err) {
+      /* not worth an error bubble - they can just start talking */
+    } finally {
+      setBusy(false, IDLE_STATUS);
     }
   }
 
@@ -640,9 +783,34 @@
    * Append a turn and return its body element, so a streaming reply
    * can keep rewriting the same node as tokens arrive.
    */
-  function appendTurn(role, text) {
+  /** The face on an assistant bubble. */
+  const ASSISTANT_AVATAR = "🤖";
+
+  /**
+   * One chat bubble, with its avatar beside it: the technician's initials on
+   * the right, the assistant's mark on the left. `avatar` overrides the
+   * technician's initials - the supervisor reading someone else's transcript
+   * needs that record's technician, not their own initials.
+   */
+  function appendTurn(role, text, { avatar } = {}) {
     clearEmptyState();
     hideTyping();
+
+    const row = document.createElement("div");
+    row.className = `chat-row chat-row--${role}`;
+
+    const face = document.createElement("span");
+    face.className = `chat-avatar chat-avatar--${role}`;
+    face.setAttribute("aria-hidden", "true");
+    if (role === "technician") {
+      face.textContent =
+        avatar || initialsOf(state.user && (state.user.full_name || state.user.username));
+    } else if (role === "error") {
+      face.textContent = "!";
+    } else {
+      face.textContent = ASSISTANT_AVATAR;
+      face.classList.add("chat-avatar--emoji");
+    }
 
     const turn = document.createElement("div");
     turn.className = `transcript-turn transcript-turn--${role}`;
@@ -650,7 +818,7 @@
     const label = document.createElement("span");
     label.className = "transcript-turn__label";
     label.textContent =
-      role === "technician" ? "You" : role === "error" ? "Problem" : "Copilot";
+      role === "technician" ? "You" : role === "error" ? "Problem" : "Assistant";
 
     const body = document.createElement("span");
     body.className = "transcript-turn__body";
@@ -663,7 +831,13 @@
 
     label.appendChild(speaking);
     turn.append(label, body);
-    els.transcript.appendChild(turn);
+
+    // Technician bubbles sit right-aligned, so their avatar trails the
+    // bubble; everyone else's leads it.
+    if (role === "technician") row.append(turn, face);
+    else row.append(face, turn);
+
+    els.transcript.appendChild(row);
     keepPinned();
     return body;
   }
@@ -1127,7 +1301,11 @@
     els.cardPhotos.hidden = false;
 
     const count = state.photos.length;
-    const locked = state.recordStatus === "COMPLETE" || state.recordStatus === "CLOSED";
+    // Completing a finding does NOT close the door on evidence - the assistant
+    // asks "no photo attached, want to add one?" at exactly the moment the
+    // last field lands and the record flips to COMPLETE. Only a record
+    // posted to SAP is immutable.
+    const locked = state.recordStatus === "CLOSED";
     const ready = Boolean(state.recordId) && !locked;
 
     els.btnTakePhoto.disabled = !ready;
@@ -1142,8 +1320,10 @@
     els.photoHint.textContent = !state.recordId
       ? "Describe the finding first — then you can attach a photo of it."
       : locked
-        ? "This finding is complete and locked — photos can no longer be attached."
-        : "Attached photos go into the PDF report and are visible to your supervisor.";
+        ? "This finding has been posted to SAP — photos can no longer be attached."
+        : count
+          ? "Attached photos go into the PDF report and are visible to your supervisor."
+          : "No photo yet. You can still add one after the finding completes — until your supervisor posts it to SAP.";
 
     renderPhotoGrid();
   }
@@ -1509,6 +1689,10 @@
 
     state.photosEnabled = Boolean(data.photos_enabled);
 
+    if (Array.isArray(data.severity_levels) && data.severity_levels.length) {
+      state.severityLevels = data.severity_levels;
+    }
+
     els.filterSelects.forEach((select) => {
       const values = data[select.dataset.filter] || [];
       const previous = select.value;
@@ -1620,8 +1804,10 @@
       summary.querySelector(".record-row__component").insertAdjacentHTML(
         "afterend", `<span>${photoBadge}</span>`
       );
+      // Same track widths as .record-row__summary in the stylesheet, with
+      // the photo badge's column inserted after the component.
       summary.style.gridTemplateColumns =
-        "96px minmax(0, 1fr) 54px 92px 96px 130px 116px 26px";
+        "104px minmax(0, 1fr) 58px 100px 104px 140px 132px 26px";
     }
 
     summary.addEventListener("click", () => toggleRecordRow(record.RECORD_ID));
@@ -1721,19 +1907,49 @@
         </div>`;
     };
 
-    const staticRow = (label, value) => `
-      <div class="detail-item">
+    const staticRow = (label, value, { wide = false } = {}) => `
+      <div class="detail-item ${wide ? "detail-item--wide" : ""}">
         <span class="detail-item__label">${label}</span>
         <span class="detail-item__value ${value ? "" : "is-empty"}">${escapeHtml(value || "—")}</span>
       </div>`;
 
+    // Severity is set from its own dialog rather than as a field in the edit
+    // form: it is a fixed vocabulary, it is the one thing a supervisor most
+    // often changes on someone else's finding, and doing it this way makes
+    // it reachable on a COMPLETE record too - which the inline form is not.
+    const severityCell = `
+      <div class="detail-item">
+        <span class="detail-item__label">Severity</span>
+        <span class="detail-item__value-row">
+          <span class="badge ${severityBadgeClass(record.SEVERITY)}">${escapeHtml(record.SEVERITY || "—")}</span>
+          ${
+            status === "CLOSED"
+              ? ""
+              : `<button type="button" class="link-btn" data-action="severity"
+                    title="Change the severity level">Change</button>`
+          }
+        </span>
+      </div>`;
+
+    // The technician's face is the one who logged the finding, not whoever
+    // happens to be reading it.
+    const technicianFace = initialsOf(record.TECHNICIAN);
+
     const turns = conversation
       .map((turn) => {
-        const who = turn.ROLE === "technician" ? "Technician" : "Copilot";
-        return `<div class="transcript-turn transcript-turn--${escapeHtml(turn.ROLE)}">
+        const isTech = turn.ROLE === "technician";
+        const role = isTech ? "technician" : "assistant";
+        const who = isTech ? "Technician" : "Assistant";
+        const face = isTech
+          ? `<span class="chat-avatar chat-avatar--technician" aria-hidden="true">${escapeHtml(technicianFace)}</span>`
+          : `<span class="chat-avatar chat-avatar--assistant chat-avatar--emoji" aria-hidden="true">${ASSISTANT_AVATAR}</span>`;
+        const bubble = `<div class="transcript-turn transcript-turn--${role}">
                   <span class="transcript-turn__label">${who}</span>
                   <span>${escapeHtml(turn.MESSAGE || "")}</span>
                 </div>`;
+        return `<div class="chat-row chat-row--${role}">${
+          isTech ? bubble + face : face + bubble
+        }</div>`;
       })
       .join("");
 
@@ -1748,6 +1964,13 @@
       )
       .join("");
 
+    // A CLOSED record has been posted to SAP and is the audit trail, so it
+    // cannot be discarded - the button is simply absent rather than shown
+    // disabled, since it is never going to become available again.
+    const discardAction = status === "CLOSED"
+      ? ""
+      : `<button class="btn btn--danger btn--small" data-action="discard">Discard record</button>`;
+
     const sapAction = status === "CLOSED"
       ? `<span class="status-pill status-pill--closed">Posted to SAP</span>`
       : `<button class="btn btn--sap btn--small" data-action="post-sap"
@@ -1760,47 +1983,60 @@
         ${editableRow("Aircraft", "AIRCRAFT_REG", record.AIRCRAFT_REG)}
         ${editableRow("Component", "COMPONENT", record.COMPONENT)}
         ${editableRow("Location", "LOCATION", record.LOCATION)}
-        ${editableRow("Severity", "SEVERITY", record.SEVERITY)}
+        ${severityCell}
         <div class="detail-item">
           <span class="detail-item__label">Status</span>
           <span class="status-pill status-pill--${status.toLowerCase()}">${escapeHtml(status)}</span>
         </div>
         ${staticRow("Technician", record.TECHNICIAN)}
         ${staticRow("Inspected", formatDate(record.INSPECTION_TS))}
-        ${staticRow("Record id", record.RECORD_ID)}
+        ${staticRow("Record id", record.RECORD_ID, { wide: true })}
       </div>
 
-      <div class="detail-section">
-        <p class="detail-section__title">Finding</p>
-        ${editable
-          ? `<textarea class="text-input text-input--block" data-field="FINDING" rows="3">${escapeHtml(record.FINDING || "")}</textarea>`
-          : `<p class="detail-section__body">${escapeHtml(record.FINDING || "Not recorded")}</p>`}
+      <!-- The written record on the left, the conversation it came from on
+           the right. Side by side because a supervisor reads them against
+           each other - and because a full-width transcript column left the
+           bubbles squeezed into a third of the row. -->
+      <div class="detail-columns">
+        <div class="detail-columns__main">
+          <div class="detail-section">
+            <p class="detail-section__title">Finding</p>
+            ${editable
+              ? `<textarea class="text-input text-input--block" data-field="FINDING" rows="4">${escapeHtml(record.FINDING || "")}</textarea>`
+              : `<p class="detail-section__body">${escapeHtml(record.FINDING || "Not recorded")}</p>`}
+          </div>
+
+          <div class="detail-section">
+            <p class="detail-section__title">Recommended action</p>
+            ${editable
+              ? `<textarea class="text-input text-input--block" data-field="RECOMMENDED_ACTION" rows="4">${escapeHtml(record.RECOMMENDED_ACTION || "")}</textarea>`
+              : `<p class="detail-section__body">${escapeHtml(record.RECOMMENDED_ACTION || "Not recorded")}</p>`}
+          </div>
+
+          ${
+            photos.length
+              ? `<div class="detail-section">
+                   <p class="detail-section__title">Photographic evidence (${photos.length})</p>
+                   <div class="photo-grid">${photoPlates}</div>
+                 </div>`
+              : ""
+          }
+        </div>
+
+        <div class="detail-columns__aside">
+          ${
+            turns
+              ? `<div class="detail-section detail-section--transcript">
+                   <p class="detail-section__title">Transcript</p>
+                   <div class="record-detail__conversation">${turns}</div>
+                 </div>`
+              : `<div class="detail-section detail-section--transcript">
+                   <p class="detail-section__title">Transcript</p>
+                   <p class="detail-section__body is-empty">No conversation was recorded for this finding.</p>
+                 </div>`
+          }
+        </div>
       </div>
-
-      <div class="detail-section">
-        <p class="detail-section__title">Recommended action</p>
-        ${editable
-          ? `<textarea class="text-input text-input--block" data-field="RECOMMENDED_ACTION" rows="3">${escapeHtml(record.RECOMMENDED_ACTION || "")}</textarea>`
-          : `<p class="detail-section__body">${escapeHtml(record.RECOMMENDED_ACTION || "Not recorded")}</p>`}
-      </div>
-
-      ${
-        photos.length
-          ? `<div class="detail-section">
-               <p class="detail-section__title">Photographic evidence (${photos.length})</p>
-               <div class="photo-grid">${photoPlates}</div>
-             </div>`
-          : ""
-      }
-
-      ${
-        turns
-          ? `<div class="detail-section">
-               <p class="detail-section__title">Transcript</p>
-               <div class="record-detail__conversation">${turns}</div>
-             </div>`
-          : ""
-      }
 
       <p class="field-error" data-role="edit-error"></p>
 
@@ -1810,6 +2046,7 @@
         <button class="btn btn--primary btn--small" data-action="report">Download PDF report</button>
         <button class="btn btn--secondary btn--small" data-action="ask">Ask the assistant about this</button>
         ${sapAction}
+        ${discardAction}
       </div>
     `;
 
@@ -1838,6 +2075,48 @@
           errorEl.textContent = err.message;
           sapBtn.disabled = false;
           sapBtn.textContent = originalLabel;
+        }
+      });
+    }
+
+    const severityBtn = container.querySelector('[data-action="severity"]');
+    if (severityBtn) {
+      severityBtn.addEventListener("click", () =>
+        openSeverityDialog(record, (message) => {
+          errorEl.textContent = message;
+        })
+      );
+    }
+
+    const discardBtn = container.querySelector('[data-action="discard"]');
+    if (discardBtn) {
+      discardBtn.addEventListener("click", async () => {
+        const label = [record.AIRCRAFT_REG, record.COMPONENT]
+          .filter(Boolean)
+          .join(" — ") || "this finding";
+        // Irreversible, and it takes the transcript and photos with it, so
+        // say so plainly before doing it.
+        if (
+          !window.confirm(
+            `Delete ${label} permanently?\n\n` +
+            "Its transcript and any photos are deleted too. This cannot be undone."
+          )
+        ) {
+          return;
+        }
+
+        discardBtn.disabled = true;
+        discardBtn.textContent = "Discarding…";
+        errorEl.textContent = "";
+        try {
+          await api(API.deleteRecord(record.RECORD_ID), { method: "DELETE" });
+          collapseOpenRow();
+          await loadFilterOptions();
+          await loadRecords();
+        } catch (err) {
+          errorEl.textContent = err.message;
+          discardBtn.disabled = false;
+          discardBtn.textContent = "Discard record";
         }
       });
     }
@@ -1886,6 +2165,105 @@
         openPhotoViewer(img.dataset.photoUrl, img.dataset.photoCaption)
       );
     });
+  }
+
+  // ------------------------------------------------------------
+  // Supervisor: change a finding's severity
+  // --------------------------------------------------------
+  // Its own dialog rather than a field in the edit form, because severity
+  // is a fixed vocabulary and because a COMPLETE finding - which the edit
+  // form does not offer at all - is exactly when a supervisor tends to
+  // want a second look at the level the assistant picked.
+  // ------------------------------------------------------------
+
+  function openSeverityDialog(record, onError) {
+    const current = record.SEVERITY || "";
+    const levels = state.severityLevels.slice();
+    // A finding carrying a level from before the vocabulary settled keeps
+    // it as a choice rather than being quietly rewritten on the next save.
+    if (current && !levels.some((l) => l.toLowerCase() === current.toLowerCase())) {
+      levels.push(current);
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal";
+    overlay.innerHTML = `
+      <div class="modal__card" role="dialog" aria-modal="true" aria-label="Change severity">
+        <div class="modal__head">
+          <h3 class="modal__title">Severity</h3>
+          <p class="modal__subtitle">
+            ${escapeHtml(record.AIRCRAFT_REG || "—")} · ${escapeHtml(record.COMPONENT || "—")}
+          </p>
+        </div>
+
+        <div class="severity-choices">
+          ${levels
+            .map(
+              (level) => `
+            <button type="button" class="severity-choice ${
+              level.toLowerCase() === current.toLowerCase() ? "is-current" : ""
+            }" data-level="${escapeHtml(level)}">
+              <span class="badge ${severityBadgeClass(level)}">${escapeHtml(level)}</span>
+              ${level.toLowerCase() === current.toLowerCase()
+                ? '<span class="severity-choice__tick" aria-hidden="true">✓</span>'
+                : ""}
+            </button>`
+            )
+            .join("")}
+        </div>
+
+        <p class="field-error" data-role="severity-error"></p>
+
+        <div class="modal__actions">
+          <button type="button" class="btn btn--ghost btn--small" data-action="cancel">Cancel</button>
+        </div>
+      </div>`;
+
+    const errorEl = overlay.querySelector('[data-role="severity-error"]');
+
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") close();
+    };
+
+    // Clicking the backdrop closes; clicking the card must not.
+    overlay.addEventListener("click", close);
+    overlay.querySelector(".modal__card").addEventListener("click", (e) => e.stopPropagation());
+    overlay.querySelector('[data-action="cancel"]').addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    overlay.querySelectorAll("[data-level]").forEach((choice) => {
+      choice.addEventListener("click", async () => {
+        const level = choice.dataset.level;
+        if (level.toLowerCase() === current.toLowerCase()) {
+          close();
+          return;
+        }
+
+        overlay.querySelectorAll("[data-level]").forEach((b) => (b.disabled = true));
+        errorEl.textContent = "";
+
+        try {
+          await patchJson(API.patchRecord(record.RECORD_ID), { severity: level });
+          close();
+          // Filling the last missing field can flip the record to COMPLETE,
+          // which changes the row's badge and can move it out of the current
+          // filter - so reload rather than patching the badge in place.
+          await loadFilterOptions();
+          await refreshRecordAfterEdit(record.RECORD_ID);
+        } catch (err) {
+          errorEl.textContent = err.message;
+          overlay.querySelectorAll("[data-level]").forEach((b) => (b.disabled = false));
+          if (onError) onError(err.message);
+        }
+      });
+    });
+
+    document.body.appendChild(overlay);
+    overlay.querySelector("[data-level]").focus();
   }
 
   // ------------------------------------------------------------
@@ -1942,6 +2320,8 @@
 
   els.formLogin.addEventListener("submit", handleLogin);
   els.btnSignOut.addEventListener("click", handleSignOut);
+  els.btnSignOutCard.addEventListener("click", handleSignOut);
+  wireUserMenu();
 
   els.btnStartSession.addEventListener("click", startSession);
   els.btnEndSession.addEventListener("click", endSession);
