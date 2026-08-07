@@ -1943,10 +1943,7 @@
         const face = isTech
           ? `<span class="chat-avatar chat-avatar--technician" aria-hidden="true">${escapeHtml(technicianFace)}</span>`
           : `<span class="chat-avatar chat-avatar--assistant chat-avatar--emoji" aria-hidden="true">${ASSISTANT_AVATAR}</span>`;
-        const bubble = `<div class="transcript-turn transcript-turn--${role}">
-                  <span class="transcript-turn__label">${who}</span>
-                  <span>${escapeHtml(turn.MESSAGE || "")}</span>
-                </div>`;
+        const bubble = `<div class="transcript-turn transcript-turn--${role}"><span class="transcript-turn__label">${who}</span><span>${escapeHtml(turn.MESSAGE || "")}</span></div>`;
         return `<div class="chat-row chat-row--${role}">${
           isTech ? bubble + face : face + bubble
         }</div>`;
